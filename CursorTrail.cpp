@@ -112,6 +112,7 @@ std::mutex g_historyMutex;          // protects g_history (accessed by poll + re
 HANDLE g_pollThread = NULL;
 HANDLE g_pollStopEvent = NULL;
 std::atomic<bool> g_isGameRunning(false); // set by render thread, read by poll thread
+std::atomic<bool> g_renderScheduled(false); // set by MMTimerCallback, cleared by the overlay thread
 int g_sampleRate = 1;               // polling interval in ms
 // Direct2D globals
 ID2D1Factory* g_pD2DFactory = nullptr;
@@ -1203,6 +1204,9 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
 // thread while using the multimedia timer for non-coalesced wakeups.
 LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     if (uMsg == WM_TIMER) {
+        // Clear before rendering so a frame that arrives while this one is still
+        // in flight can queue exactly one more render (bounded, no backlog).
+        g_renderScheduled.store(false);
         SmearTimerProc(hwnd, uMsg, wParam, GetTickCount());
         return 0;
     }
@@ -1214,8 +1218,15 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 // to wake the message loop on the overlay thread, which then runs
 // SmearTimerProc via OverlayWndProc.
 void CALLBACK MMTimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2) {
-    if (g_overlayHwnd) {
-        PostMessage(g_overlayHwnd, WM_TIMER, 1, 0);
+    // Coalesce: only post if no render is already pending. PostMessage does not
+    // coalesce like SetTimer, so an unthrottled post every 8ms builds an
+    // unbounded WM_TIMER backlog whenever a frame runs long.
+    if (g_overlayHwnd && !g_renderScheduled.exchange(true)) {
+        if (!PostMessage(g_overlayHwnd, WM_TIMER, 1, 0)) {
+            // Window is gone or queue failed; clear so future renders aren't
+            // permanently blocked.
+            g_renderScheduled.store(false);
+        }
     }
 }
 
@@ -1286,7 +1297,7 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
         SetEvent(g_pollStopEvent);
     }
     if (g_pollThread) {
-        WaitForSingleObject(g_pollThread, 2000);
+        WaitForSingleObject(g_pollThread, 200);
         CloseHandle(g_pollThread);
         g_pollThread = NULL;
     }
