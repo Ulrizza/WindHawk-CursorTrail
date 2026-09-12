@@ -38,5 +38,5 @@ Requires the Windhawk SDK. Link against `d2d1`, `ole32`, `gdi32`, `shell32`, `wi
 
 ```
 # From the Windhawk mod directory:
-cl /EHsc /O2 CursorStuff.cpp /link d2d1.lib ole32.lib gdi32.lib shell32.lib windowscodecs.lib winmm.lib
+cl /EHsc /O2 CursorTrail.cpp /link d2d1.lib ole32.lib gdi32.lib shell32.lib windowscodecs.lib winmm.lib
 ```
