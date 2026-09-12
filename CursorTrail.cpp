@@ -28,6 +28,12 @@
     $options:
     - time_based: Time based
     - size_based: Size based
+  - antialiasing: "true"
+    $name: Antialiasing
+    $description: Smooth the trail edges (disable for hard, pixelated edges)
+    $options:
+    - "true": "True"
+    - "false": "False"
   - timeBased:
     - tail_duration: 500
       $name: Tail duration
@@ -123,6 +129,7 @@ int g_tailOffsetY = 0;
 int g_tailDuration = 1000;
 std::wstring g_trailMode = L"time_based";
 int g_tailSize = 2000;
+bool g_antialiasing = true;
 
 DWORD g_sizeTimeout = 0;
 DWORD g_lastMovementTime = 0;
@@ -240,6 +247,10 @@ void LoadSettings() {
         g_trailMode = L"time_based";
     }
     if (modeSetting) Wh_FreeStringSetting(modeSetting);
+
+    PCWSTR aaSetting = Wh_GetStringSetting(L"simpleLineOptions.antialiasing");
+    g_antialiasing = !aaSetting || wcscmp(aaSetting, L"false") != 0;
+    if (aaSetting) Wh_FreeStringSetting(aaSetting);
 
     g_tailDuration = Wh_GetIntSetting(L"simpleLineOptions.timeBased.tail_duration");
     g_tailSize = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.tail_size");
@@ -965,7 +976,9 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
             
             g_pDCRenderTarget->BeginDraw();
             g_pDCRenderTarget->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
-            g_pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+            g_pDCRenderTarget->SetAntialiasMode(g_antialiasing
+                ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE
+                : D2D1_ANTIALIAS_MODE_ALIASED);
 
             // Step 1 — Snapshot g_history and build trail points
             // Adaptive min distance: smaller kMinDist for longer trails so
