@@ -6,7 +6,7 @@
 // @author          Ulrizza
 // @license         MIT
 // @include         windhawk.exe
-// @compilerOptions -ld2d1 -lole32 -lgdi32 -lshell32 -lwindowscodecs -lwinmm
+// @compilerOptions -ld2d1 -lole32 -lgdi32 -lshell32 -lwindowscodecs -lwinmm -lshcore
 // ==/WindhawkMod==
 
 // ==WindhawkModReadme==
@@ -82,6 +82,11 @@
     $name: Y
     $description: Fine-tune the trail origin vertically (auto-centered by default, 0 = no adjustment)
   $name: Trail offset
+- debug:
+  - show_outline: false
+    $name: Show outline
+    $description: Draw a white box around the detected cursor bitmap, a red box around its visible (alpha-trimmed) pixels, and a blue + at the trail start, to verify the trail origin and cursor size.
+  $name: Debug
 */
 // ==/WindhawkModSettings==
 
@@ -89,6 +94,7 @@
 #include <d2d1.h>
 #include <math.h>
 #include <shellapi.h>
+#include <shellscalingapi.h>
 #include <wincodec.h>
 #include <mmsystem.h>
 #include <atomic>
@@ -131,6 +137,7 @@ int g_tailDuration = 1000;
 std::wstring g_trailMode = L"time_based";
 int g_tailSize = 2000;
 bool g_antialiasing = true;
+bool g_debugShowOutline = false;
 
 DWORD g_sizeTimeout = 0;
 DWORD g_lastMovementTime = 0;
@@ -155,20 +162,29 @@ std::vector<float> g_simpleLineOpacityValues; // parsed opacity values (0-100)
 ID2D1SolidColorBrush* g_pSimpleLineBrush = nullptr;
 ID2D1StrokeStyle* g_pStrokeStyle = nullptr;
 
+// DEBUG: white 1px box around the detected cursor bitmap (temporary).
+ID2D1SolidColorBrush* g_pDebugBrush = nullptr;
+// DEBUG: red 1px box around the alpha-trimmed (visible) cursor pixels (temporary).
+ID2D1SolidColorBrush* g_pDebugBrushRed = nullptr;
+// DEBUG: blue "+" marking the exact trail start point (temporary).
+ID2D1SolidColorBrush* g_pDebugBrushBlue = nullptr;
+
 // Cursor visual-center cache (avoids re-querying GetIconInfo every frame
 // when the cursor handle hasn't changed)
 HCURSOR g_cachedCursor = NULL;
-POINT g_cursorCenterOffset = { 0, 0 };  // added to hotspot to reach bitmap center
+HCURSOR g_cachedBitmapCursor = NULL;  // separate cache for the WIC bitmap rebuild
+POINT g_cursorCenterOffset = { 0, 0 };  // added to hotspot to reach bitmap center (anchors debug boxes)
+POINT g_cursorVisualOffset = { 0, 0 };  // added to hotspot to reach visible-pixel center (trail origin)
 
-// Frozen cursor center offset, snapshotted by the poll thread when a new
+// Frozen trail-origin offset, snapshotted by the poll thread when a new
 // trail starts (g_history is empty and a new sample is about to be pushed).
 // All samples in a trail share the same coordinate space, even if the cursor
-// shape changes mid-trail (e.g. arrow → I-beam). g_cursorCenterOffset is
+// shape changes mid-trail (e.g. arrow → I-beam). g_cursorVisualOffset is
 // updated by the render thread; g_frozenCursorOffset is read and written by
 // the poll thread.
 POINT g_frozenCursorOffset = { 0, 0 };
 
-std::mutex g_offsetMutex;  // protects g_cursorCenterOffset and g_frozenCursorOffset
+std::mutex g_offsetMutex;  // protects g_cursorCenterOffset, g_cursorVisualOffset and g_frozenCursorOffset
                             // lock order: g_historyMutex (if needed) THEN g_offsetMutex
 
 
@@ -180,6 +196,11 @@ int g_cursorBmWidth = 0;
 int g_cursorBmHeight = 0;
 float g_cursorDpiScaleX = 1.0f;
 float g_cursorDpiScaleY = 1.0f;
+
+// DEBUG: visible (alpha-trimmed) bounds of the cursor bitmap, in bitmap coords
+// (right/bottom exclusive). Temporary, used for the red debug box.
+bool g_cursorVisibleValid = false;
+int g_cursorVisLeft = 0, g_cursorVisTop = 0, g_cursorVisRight = 0, g_cursorVisBottom = 0;
 
 // Multimedia timer handle for the render loop. Replaces SetTimer/WM_TIMER
 // for smoother, non-coalesced wakeups. The timer callback runs on a system
@@ -239,6 +260,8 @@ static bool ParseHexColor(const std::wstring& hex, float& r, float& g, float& b)
 void LoadSettings() {
     g_tailOffsetX = Wh_GetIntSetting(L"tail_offset.x");
     g_tailOffsetY = Wh_GetIntSetting(L"tail_offset.y");
+
+    g_debugShowOutline = Wh_GetIntSetting(L"debug.show_outline") != 0;
 
     // Trail mode
     PCWSTR modeSetting = Wh_GetStringSetting(L"simpleLineOptions.trail_mode");
@@ -364,6 +387,48 @@ static void FreeIconInfoBitmaps(ICONINFO& ii) {
     if (ii.hbmMask)  DeleteObject(ii.hbmMask);
 }
 
+// Reads a DWORD from the registry. Returns 0 and sets found=false on failure.
+static DWORD ReadRegDword(HKEY root, const wchar_t* subKey, const wchar_t* valueName, bool& found) {
+    found = false;
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(root, subKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS) return 0;
+    DWORD data = 0, size = sizeof(data), type = 0;
+    if (RegQueryValueExW(hKey, valueName, nullptr, &type, (BYTE*)&data, &size) == ERROR_SUCCESS &&
+        type == REG_DWORD && size == sizeof(data)) {
+        found = true;
+    }
+    RegCloseKey(hKey);
+    return data;
+}
+
+// Returns the true on-screen size (physical pixels) of the cursor on the monitor
+// under the pointer. The Windows cursor-size setting is stored in the registry
+// as a DPI-independent base size (HKCU\Control Panel\Cursors\CursorBaseSize,
+// default 32); the system scales it by the monitor DPI. SM_CXCURSOR/SM_CYCURSOR
+// only report the nominal default and ignore the setting, so they are used only
+// as a fallback.
+static void GetActualCursorSize(int& cx, int& cy) {
+    UINT dpiX = 96, dpiY = 96;
+    POINT pt;
+    if (GetCursorPos(&pt)) {
+        HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        if (hMon) {
+            GetDpiForMonitor(hMon, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
+        }
+    }
+
+    bool found = false;
+    DWORD base = ReadRegDword(HKEY_CURRENT_USER, L"Control Panel\\Cursors",
+                              L"CursorBaseSize", found);
+    if (found && base > 0) {
+        cx = (int)((double)base * dpiX / 96.0 + 0.5);
+        cy = (int)((double)base * dpiY / 96.0 + 0.5);
+    } else {
+        cx = GetSystemMetricsForDpi(SM_CXCURSOR, dpiX);
+        cy = GetSystemMetricsForDpi(SM_CYCURSOR, dpiY);
+    }
+}
+
 static void ResolveCursorBitmapDimensions(ICONINFO& ii, int& bmWidth, int& bmHeight, HBITMAP& hbmToUse) {
     bmWidth = 0; bmHeight = 0; hbmToUse = NULL;
     if (ii.hbmColor) {
@@ -384,14 +449,70 @@ static void ResolveCursorBitmapDimensions(ICONINFO& ii, int& bmWidth, int& bmHei
     }
 }
 
-// Compute the offset from the cursor's hotspot to the visual center of its bitmap.
-// Cached per-HCURSOR so we only do the work when the cursor shape actually changes.
+// Computes the visible (non-transparent) pixel bounds of a cursor HBITMAP by
+// scanning its alpha channel (threshold 8 ignores faint anti-aliased edges).
+// Bounds are in bitmap pixel coordinates (right/bottom exclusive). Uses WIC
+// only, so it doesn't require a Direct2D render target.
+static void ComputeVisibleBounds(HBITMAP hbm, int& left, int& top, int& right, int& bottom, bool& valid) {
+    left = top = right = bottom = 0;
+    valid = false;
+
+    IWICImagingFactory* pWicFactory = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
+                                  IID_PPV_ARGS(&pWicFactory));
+    if (FAILED(hr) || !pWicFactory) return;
+
+    IWICBitmap* pWicBitmap = nullptr;
+    hr = pWicFactory->CreateBitmapFromHBITMAP(hbm, NULL,
+        WICBitmapUsePremultipliedAlpha, &pWicBitmap);
+    if (SUCCEEDED(hr) && pWicBitmap) {
+        UINT w = 0, h = 0;
+        pWicBitmap->GetSize(&w, &h);
+        IWICFormatConverter* pConv = nullptr;
+        if (SUCCEEDED(pWicFactory->CreateFormatConverter(&pConv)) && pConv) {
+            if (SUCCEEDED(pConv->Initialize(pWicBitmap, GUID_WICPixelFormat32bppBGRA,
+                    WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom))) {
+                UINT stride = w * 4;
+                std::vector<BYTE> pixels((size_t)stride * h);
+                if (SUCCEEDED(pConv->CopyPixels(nullptr, stride,
+                        (UINT)pixels.size(), pixels.data()))) {
+                    int minX = (int)w, minY = (int)h, maxX = -1, maxY = -1;
+                    for (UINT y = 0; y < h; ++y) {
+                        const BYTE* row = pixels.data() + (size_t)y * stride;
+                        for (UINT x = 0; x < w; ++x) {
+                            if (row[x * 4 + 3] > 8) {
+                                if ((int)x < minX) minX = (int)x;
+                                if ((int)x > maxX) maxX = (int)x;
+                                if ((int)y < minY) minY = (int)y;
+                                if ((int)y > maxY) maxY = (int)y;
+                            }
+                        }
+                    }
+                    if (maxX >= minX && maxY >= minY) {
+                        left = minX; top = minY; right = maxX + 1; bottom = maxY + 1;
+                        valid = true;
+                    }
+                }
+            }
+            pConv->Release();
+        }
+        pWicBitmap->Release();
+    }
+    pWicFactory->Release();
+}
+
+// Compute the offsets from the cursor's hotspot to (a) the bitmap center, used
+// to anchor the debug outline boxes, and (b) the visible-pixel center, used as
+// the trail origin. Cached per-HCURSOR so we only do the work when the cursor
+// shape actually changes.
 void UpdateCursorCenterOffset() {
     std::lock_guard<std::mutex> lock(g_offsetMutex);
 
     CURSORINFO ci = { sizeof(CURSORINFO) };
     if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
         g_cursorCenterOffset = { 0, 0 };
+        g_cursorVisualOffset = { 0, 0 };
+        g_cursorVisibleValid = false;
         g_cachedCursor = NULL;
         return;
     }
@@ -403,6 +524,8 @@ void UpdateCursorCenterOffset() {
     ICONINFO ii = { };
     if (!GetIconInfo(ci.hCursor, &ii)) {
         g_cursorCenterOffset = { 0, 0 };
+        g_cursorVisualOffset = { 0, 0 };
+        g_cursorVisibleValid = false;
         g_cachedCursor = NULL;
         return;
     }
@@ -412,14 +535,30 @@ void UpdateCursorCenterOffset() {
     ResolveCursorBitmapDimensions(ii, bmWidth, bmHeight, hbmToUse);
 
     if (bmWidth > 0 && bmHeight > 0) {
-        float sx = (float)GetSystemMetrics(SM_CXCURSOR) / (float)bmWidth;
-        float sy = (float)GetSystemMetrics(SM_CYCURSOR) / (float)bmHeight;
-        if (sx < 1.0f) sx = 1.0f;
-        if (sy < 1.0f) sy = 1.0f;
+        int actualX = 0, actualY = 0;
+        GetActualCursorSize(actualX, actualY);
+        float sx = (float)actualX / (float)bmWidth;
+        float sy = (float)actualY / (float)bmHeight;
+
+        // Bitmap center (anchors the debug outline boxes).
         g_cursorCenterOffset.x = (int)(((bmWidth / 2.0f) - (int)ii.xHotspot) * sx + 0.5f);
         g_cursorCenterOffset.y = (int)(((bmHeight / 2.0f) - (int)ii.yHotspot) * sy + 0.5f);
+
+        // Visible-pixel center (trail origin). Falls back to the bitmap center.
+        ComputeVisibleBounds(hbmToUse, g_cursorVisLeft, g_cursorVisTop,
+                             g_cursorVisRight, g_cursorVisBottom, g_cursorVisibleValid);
+        float visCx = bmWidth / 2.0f;
+        float visCy = bmHeight / 2.0f;
+        if (g_cursorVisibleValid) {
+            visCx = (g_cursorVisLeft + g_cursorVisRight) / 2.0f;
+            visCy = (g_cursorVisTop + g_cursorVisBottom) / 2.0f;
+        }
+        g_cursorVisualOffset.x = (int)((visCx - (int)ii.xHotspot) * sx + 0.5f);
+        g_cursorVisualOffset.y = (int)((visCy - (int)ii.yHotspot) * sy + 0.5f);
     } else {
         g_cursorCenterOffset = { 0, 0 };
+        g_cursorVisualOffset = { 0, 0 };
+        g_cursorVisibleValid = false;
     }
 
     FreeIconInfoBitmaps(ii);
@@ -428,27 +567,29 @@ void UpdateCursorCenterOffset() {
 }
 
 // Rebuild the cached D2D bitmap of the current cursor. Called when the cursor
-// shape changes (HCURSOR differs from g_cachedCursor). Uses WIC to convert the
-// GDI HBITMAP from GetIconInfo into an ID2D1Bitmap compatible with the render
+// shape changes (HCURSOR differs from g_cachedBitmapCursor). Uses WIC to convert
+// the GDI HBITMAP from GetIconInfo into an ID2D1Bitmap compatible with the render
 // target. Monochrome cursors (no hbmColor) are handled via the mask bitmap.
 void UpdateCursorBitmap() {
     CURSORINFO ci = { sizeof(CURSORINFO) };
     if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
         if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
+        g_cachedBitmapCursor = NULL;
         g_cursorBmWidth = 0;
         g_cursorBmHeight = 0;
         return;
     }
 
-    // Reuse the cache check from UpdateCursorCenterOffset: if the HCURSOR
-    // hasn't changed and we already have a bitmap, nothing to do.
-    if (ci.hCursor == g_cachedCursor && g_cursorBitmap) {
+    // Separate cache from g_cachedCursor (which UpdateCursorCenterOffset updates
+    // first): rebuild only when the cursor handle actually changes.
+    if (ci.hCursor == g_cachedBitmapCursor && g_cursorBitmap) {
         return;
     }
 
     ICONINFO ii = { };
     if (!GetIconInfo(ci.hCursor, &ii)) {
         if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
+        g_cachedBitmapCursor = NULL;
         g_cursorBmWidth = 0;
         g_cursorBmHeight = 0;
         return;
@@ -461,6 +602,7 @@ void UpdateCursorBitmap() {
     if (!hbmToUse || bmWidth <= 0 || bmHeight <= 0) {
         FreeIconInfoBitmaps(ii);
         if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
+        g_cachedBitmapCursor = NULL;
         g_cursorBmWidth = 0;
         g_cursorBmHeight = 0;
         return;
@@ -488,16 +630,19 @@ void UpdateCursorBitmap() {
                 if (SUCCEEDED(hr) && g_cursorBitmap) {
                     g_cursorBmWidth = (int)w;
                     g_cursorBmHeight = (int)h;
-                    g_cursorDpiScaleX = (float)GetSystemMetrics(SM_CXCURSOR) / (float)w;
-                    g_cursorDpiScaleY = (float)GetSystemMetrics(SM_CYCURSOR) / (float)h;
-                    if (g_cursorDpiScaleX < 1.0f) g_cursorDpiScaleX = 1.0f;
-                    if (g_cursorDpiScaleY < 1.0f) g_cursorDpiScaleY = 1.0f;
+                    int actualX = 0, actualY = 0;
+                    GetActualCursorSize(actualX, actualY);
+                    g_cursorDpiScaleX = (float)actualX / (float)w;
+                    g_cursorDpiScaleY = (float)actualY / (float)h;
                 }
+
                 pWicBitmap->Release();
             }
             pWicFactory->Release();
         }
     }
+
+    g_cachedBitmapCursor = ci.hCursor;
 
     FreeIconInfoBitmaps(ii);
 }
@@ -838,12 +983,12 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             }
 
             // === TRAIL START — snapshot frozen offset when history is empty ===
-            // When a new trail starts, snapshot g_cursorCenterOffset so all
+            // When a new trail starts, snapshot g_cursorVisualOffset so all
             // samples in this trail share the same coordinate space even if the
             // cursor shape changes mid-trail.
             if (g_history.empty()) {
                 std::lock_guard<std::mutex> offsetLock(g_offsetMutex);
-                g_frozenCursorOffset = g_cursorCenterOffset;
+                g_frozenCursorOffset = g_cursorVisualOffset;
             }
 
             // Compute sample position with the frozen offset (inside the lock so
@@ -931,7 +1076,7 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
         historyEmpty = g_history.empty();
     }
 
-    if (!historyEmpty || needsClear) {
+    if (!historyEmpty || needsClear || (g_debugShowOutline && g_cursorBmWidth > 0 && g_cursorBmHeight > 0)) {
         HDC hdcScreen = GetDC(NULL);
 
         // Only allocate the massive bitmap once, or if the screen size physically changes
@@ -950,6 +1095,9 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
             if (g_pDCRenderTarget) {
                 if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
                 if (g_pSimpleLineBrush) { g_pSimpleLineBrush->Release(); g_pSimpleLineBrush = nullptr; }
+                if (g_pDebugBrush) { g_pDebugBrush->Release(); g_pDebugBrush = nullptr; }
+                if (g_pDebugBrushRed) { g_pDebugBrushRed->Release(); g_pDebugBrushRed = nullptr; }
+                if (g_pDebugBrushBlue) { g_pDebugBrushBlue->Release(); g_pDebugBrushBlue = nullptr; }
                 g_pDCRenderTarget->Release();
                 g_pDCRenderTarget = nullptr;
             }
@@ -964,6 +1112,14 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
             );
             
             g_pD2DFactory->CreateDCRenderTarget(&props, &g_pDCRenderTarget);
+            if (g_pDCRenderTarget) {
+                g_pDCRenderTarget->CreateSolidColorBrush(
+                    D2D1::ColorF(D2D1::ColorF::White), &g_pDebugBrush);
+                g_pDCRenderTarget->CreateSolidColorBrush(
+                    D2D1::ColorF(D2D1::ColorF::Red), &g_pDebugBrushRed);
+                g_pDCRenderTarget->CreateSolidColorBrush(
+                    D2D1::ColorF(D2D1::ColorF::Blue), &g_pDebugBrushBlue);
+            }
         }
 
         // Track the current frame's trail bounding box (in backbuffer coords).
@@ -1105,10 +1261,87 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
                 needsClear = false; 
             }
 
+            // DEBUG: draw outline boxes around the detected cursor bitmap and
+            // its visible (alpha-trimmed) pixels, when enabled in settings.
+            if (g_debugShowOutline && g_cursorBmWidth > 0 && g_cursorBmHeight > 0) {
+                POINT centerOffset;
+                {
+                    std::lock_guard<std::mutex> offsetLock(g_offsetMutex);
+                    centerOffset = g_cursorCenterOffset;
+                }
+                float boxW = g_cursorBmWidth * g_cursorDpiScaleX;
+                float boxH = g_cursorBmHeight * g_cursorDpiScaleY;
+                float boxCx = (float)(pt.x + centerOffset.x - vX);
+                float boxCy = (float)(pt.y + centerOffset.y - vY);
+                D2D1_RECT_F debugBox = D2D1::RectF(boxCx - boxW / 2.0f,
+                                                   boxCy - boxH / 2.0f,
+                                                   boxCx + boxW / 2.0f,
+                                                   boxCy + boxH / 2.0f);
+                if (g_pDebugBrush) {
+                    g_pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+                    g_pDCRenderTarget->DrawRectangle(debugBox, g_pDebugBrush, 1.0f);
+                }
+                // DEBUG: red box around the alpha-trimmed (visible) cursor pixels.
+                if (g_cursorVisibleValid && g_pDebugBrushRed) {
+                    float baseX = boxCx - boxW / 2.0f;
+                    float baseY = boxCy - boxH / 2.0f;
+                    D2D1_RECT_F visBox = D2D1::RectF(
+                        baseX + g_cursorVisLeft * g_cursorDpiScaleX,
+                        baseY + g_cursorVisTop * g_cursorDpiScaleY,
+                        baseX + g_cursorVisRight * g_cursorDpiScaleX,
+                        baseY + g_cursorVisBottom * g_cursorDpiScaleY);
+                    g_pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+                    g_pDCRenderTarget->DrawRectangle(visBox, g_pDebugBrushRed, 1.0f);
+                }
+                // Include the box in the dirty rect so it is always blitted.
+                LONG dbgL = (LONG)debugBox.left - 1;
+                LONG dbgT = (LONG)debugBox.top - 1;
+                LONG dbgR = (LONG)debugBox.right + 1;
+                LONG dbgB = (LONG)debugBox.bottom + 1;
+                if (hasCurBBox) {
+                    if (dbgL < curBBox.left) curBBox.left = dbgL;
+                    if (dbgT < curBBox.top) curBBox.top = dbgT;
+                    if (dbgR > curBBox.right) curBBox.right = dbgR;
+                    if (dbgB > curBBox.bottom) curBBox.bottom = dbgB;
+                } else {
+                    curBBox = { dbgL, dbgT, dbgR, dbgB };
+                    hasCurBBox = true;
+                }
+            }
+
+            // DEBUG: blue "+" marking the exact trail start (head point).
+            if (g_debugShowOutline && !smoothed.empty() && g_pDebugBrushBlue) {
+                float hx = smoothed[0].x;
+                float hy = smoothed[0].y;
+                const float half = 5.0f;
+                g_pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+                g_pDCRenderTarget->DrawLine(D2D1::Point2F(hx - half, hy),
+                                            D2D1::Point2F(hx + half, hy), g_pDebugBrushBlue, 1.0f);
+                g_pDCRenderTarget->DrawLine(D2D1::Point2F(hx, hy - half),
+                                            D2D1::Point2F(hx, hy + half), g_pDebugBrushBlue, 1.0f);
+                // Include the marker in the dirty rect so it is always blitted.
+                LONG pL = (LONG)hx - (LONG)half - 1;
+                LONG pT = (LONG)hy - (LONG)half - 1;
+                LONG pR = (LONG)hx + (LONG)half + 1;
+                LONG pB = (LONG)hy + (LONG)half + 1;
+                if (hasCurBBox) {
+                    if (pL < curBBox.left) curBBox.left = pL;
+                    if (pT < curBBox.top) curBBox.top = pT;
+                    if (pR > curBBox.right) curBBox.right = pR;
+                    if (pB > curBBox.bottom) curBBox.bottom = pB;
+                } else {
+                    curBBox = { pL, pT, pR, pB };
+                    hasCurBBox = true;
+                }
+            }
+
             HRESULT hr = g_pDCRenderTarget->EndDraw();
             if (hr == D2DERR_RECREATE_TARGET) {
                 if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
                 if (g_pSimpleLineBrush) { g_pSimpleLineBrush->Release(); g_pSimpleLineBrush = nullptr; }
+                if (g_pDebugBrush) { g_pDebugBrush->Release(); g_pDebugBrush = nullptr; }
+                if (g_pDebugBrushRed) { g_pDebugBrushRed->Release(); g_pDebugBrushRed = nullptr; }
+                if (g_pDebugBrushBlue) { g_pDebugBrushBlue->Release(); g_pDebugBrushBlue = nullptr; }
                 g_pDCRenderTarget->Release();
                 g_pDCRenderTarget = nullptr;
             }
@@ -1309,6 +1542,9 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     // Clean up our massive GPU footprint before checking out
     if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
     if (g_pSimpleLineBrush) { g_pSimpleLineBrush->Release(); g_pSimpleLineBrush = nullptr; }
+    if (g_pDebugBrush) { g_pDebugBrush->Release(); g_pDebugBrush = nullptr; }
+    if (g_pDebugBrushRed) { g_pDebugBrushRed->Release(); g_pDebugBrushRed = nullptr; }
+    if (g_pDebugBrushBlue) { g_pDebugBrushBlue->Release(); g_pDebugBrushBlue = nullptr; }
     if (g_pStrokeStyle) { g_pStrokeStyle->Release(); g_pStrokeStyle = nullptr; }
     if (g_pDCRenderTarget) { g_pDCRenderTarget->Release(); g_pDCRenderTarget = nullptr; }
     if (g_pD2DFactory) { g_pD2DFactory->Release(); g_pD2DFactory = nullptr; }

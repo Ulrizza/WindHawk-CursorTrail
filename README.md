@@ -32,12 +32,13 @@ A [Windhawk](https://windhawk.net) mod that renders a customizable cursor trail 
 | `waveform.type` | Wave pattern applied to the trail: `none`, `sinus`, `square`, or `triangle` |
 | `waveform.amplitude` | Maximum pixel offset applied by the waveform (0 = disabled) |
 | `waveform.period` | Milliseconds per full wave cycle (lower = faster wobble) |
+| `debug.show_outline` | `False` (default) — draw white (bitmap bounds) and red (visible pixels) outline boxes around the cursor, plus a blue `+` at the trail start |
 
 ## Building
 
-Requires the Windhawk SDK. Link against `d2d1`, `ole32`, `gdi32`, `shell32`, `windowscodecs`, and `winmm`.
+Requires the Windhawk SDK. Link against `d2d1`, `ole32`, `gdi32`, `shell32`, `windowscodecs`, `winmm`, and `shcore`.
 
 ```
 # From the Windhawk mod directory:
-cl /EHsc /O2 CursorTrail.cpp /link d2d1.lib ole32.lib gdi32.lib shell32.lib windowscodecs.lib winmm.lib
+cl /EHsc /O2 CursorTrail.cpp /link d2d1.lib ole32.lib gdi32.lib shell32.lib windowscodecs.lib winmm.lib shcore.lib
 ```
