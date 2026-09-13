@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13
+- Removed the Cursor ghost style implementation; the `cursor_ghost` setting is retained but renders nothing (reserved for a future rework). Debug outline dimensions now come from `UpdateCursorCenterOffset`.
+- Refactored globals into `Settings`, `CursorState`, `OriginTransition`, `RenderResources`, and `Runtime` structs, and split `SmearTimerProc` into focused helpers.
+- Added shared helpers (`ReadStringSetting`, `ParseFloatList`, `Ease`, `EvictByTime`, `RoundToLong`, `ReleaseRenderTargetResources`, `GrowBBox`) to remove duplicated logic.
+- Performance: allocation-free interpolation, precomputed color band boundaries and opacity alphas, and enum/bool state instead of per-frame string comparisons.
+- Documented the code architecture in the README.
+
 ## 0.12
 - Added "Trail origin on cursor change" setting for the Simple line style: `none` keeps the trail origin frozen, `immediate` snaps to the new cursor's visual center, and `smooth` (default) glides there with an ease-in-out transition when the cursor image changes (e.g. arrow to I-beam).
 

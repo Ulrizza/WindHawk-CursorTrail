@@ -14,6 +14,60 @@ A [Windhawk](https://windhawk.net) mod that renders a customizable cursor trail 
 - Trail segments automatically expire after the configured tail duration. The overlay is paused when a fullscreen exclusive (game) application is detected.
 - When the cursor is hidden (e.g. Windows' hide-while-typing), the trail fades out over the tail duration in both trail modes.
 
+## Architecture
+
+Single translation unit (`CursorTrail.cpp`). All state is file-scope, grouped into five struct instances:
+
+| Instance | Type | Purpose |
+|---|---|---|
+| `settings` | `Settings` | Parsed settings (tail geometry, style, width/color/opacity, origin mode). Written by `LoadSettings()`, read by all threads. |
+| `cursor` | `CursorState` | Cursor geometry cache: `centerOffset`/`visualOffset`/`frozenOffset` (mutex-protected) plus render-thread-only debug dims. |
+| `origin` | `OriginTransition` | Poll-thread-owned ease-in-out state for the trail-origin glide on cursor-image change. |
+| `render` | `RenderResources` | Direct2D factory/target/brushes, stroke style, and the cached backbuffer. Render-thread-only. |
+| `runtime` | `Runtime` | Overlay window/threads, the `history` deque, atomics, multimedia timer, and per-frame render state. |
+
+### Threads
+
+- **Overlay thread** (`OverlayThreadProc`) — creates the `WS_EX_LAYERED` topmost window, runs the message loop, and does all Direct2D rendering via `SmearTimerProc`.
+- **Poll thread** (`PollThreadProc`) — samples the cursor every 1 ms and pushes decimated samples into `runtime.history`.
+- **Multimedia timer** (`MMTimerCallback`, a system thread) — posts `WM_TIMER` at ~125 Hz to wake the overlay thread. It never touches Direct2D directly.
+
+### Locking model
+
+- `runtime.historyMutex` protects `runtime.history` (poll + render threads).
+- `cursor.offsetMutex` protects `cursor.centerOffset` / `cursor.visualOffset` / `cursor.frozenOffset` (written by render thread, read by poll thread).
+- Lock order is always `runtime.historyMutex` → `cursor.offsetMutex`.
+- `runtime.isGameRunning`, `runtime.cursorHidden`, and `runtime.renderScheduled` are atomics.
+- `origin.*`, `render.*`, and the cursor debug dimensions are single-thread owned (see table above).
+
+### Render pipeline
+
+`SmearTimerProc` is a thin orchestrator that delegates to helpers, in order:
+
+1. `EnsureBackbuffer` / `EnsureRenderTarget` — (re)create the backbuffer bitmap and D2D render target.
+2. `BuildTrailPoints` — snapshot `runtime.history` and spatially decimate.
+3. `ChaikinSmooth` — two-pass corner smoothing.
+4. `ComputeTrailBBox` — trail bounding box plus stroke-width margin.
+5. `RenderTrail` — dispatch to the active style renderer (currently only `RenderSimpleLineStyle`; `cursor_ghost` is reserved and renders nothing).
+6. `DrawDebug` — optional white/red outline boxes plus a blue trail-start marker.
+7. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
+
+### Settings & interpolation
+
+- `LoadSettings` uses `ReadStringSetting`, `ParseFloatList`, `SplitAndTrim`, and `ParseHexColor`, and precomputes color band boundaries (`settings.colorBandStart`/`colorBandEnd`) and opacity alphas (`settings.simpleLineOpacityValues`, stored as 0–1) so the hot path does no parsing or per-frame allocation.
+- `GetBlendedColor`, `InterpolateWidth`, and `InterpolateOpacity` are allocation-free; `Ease` centralizes the easing curves (`linear`/`smoothstep`/`ease_in`/`ease_out`).
+
+### Cursor geometry
+
+`UpdateCursorCenterOffset` caches, per `HCURSOR`: the bitmap-center offset (for the debug boxes), the visible-pixel-center offset (the trail origin), the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt only when the cursor handle changes.
+
+### Lifecycle
+
+- `WhTool_ModInit` — `LoadSettings()` then spawns `OverlayThreadProc`.
+- `WhTool_ModSettingsChanged` — `LoadSettings()`.
+- `WhTool_ModUninit` — signals the poll thread, kills the timer, and posts `WM_QUIT`.
+- The `Wh_ModInit` / `Wh_ModAfterInit` / `Wh_ModUninit` block at the bottom of the file is Windhawk's tool-mod launcher boilerplate and should be left as-is.
+
 ## Settings
 
 | Setting | Description |
