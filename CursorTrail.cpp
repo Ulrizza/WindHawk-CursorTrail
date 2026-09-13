@@ -1,7 +1,7 @@
 // ==WindhawkMod==
 // @id              cursor-trail
 // @name            Cursor trail
-// @description     Cursor trail overlay with configurable styles (simple line, cursor ghost)
+// @description     Cursor trail overlay with configurable styles (simple line)
 // @version         0.12
 // @author          Ulrizza
 // @license         MIT
@@ -142,12 +142,15 @@ int g_cachedVH = 0;
 int g_tailOffsetX = 0;
 int g_tailOffsetY = 0;
 int g_tailDuration = 1000;
-std::wstring g_trailMode = L"time_based";
+bool g_sizeBased = false;                               // trail mode: size_based vs time_based
 std::wstring g_trailOriginOnCursorChange = L"smooth";  // raw setting
 
 // How the trail origin reacts to cursor image changes (Simple line only).
 enum TrailOriginMode { ORIGIN_NONE, ORIGIN_IMMEDIATE, ORIGIN_SMOOTH };
 TrailOriginMode g_trailOriginMode = ORIGIN_SMOOTH;
+
+// Easing curves used for color blending and interpolation.
+enum ColorInterpolation { INTERP_LINEAR, INTERP_SMOOTHSTEP, INTERP_EASE_IN, INTERP_EASE_OUT };
 
 // Ease-in-out origin transition state (poll-thread owned).
 float g_originFromX = 0.0f, g_originFromY = 0.0f;  // value at transition start
@@ -173,16 +176,19 @@ std::wstring g_activeStyle = L"simple_line";
 
 // Simple line style settings
 std::vector<float> g_simpleLineWidths;       // parsed width values, one per stop
-std::wstring g_simpleLineColorHex = L"000000";
-std::vector<std::wstring> g_simpleLineColors;  // parsed from g_simpleLineColorHex, split on commas
 
 struct Rgb { float r, g, b; };
 std::vector<Rgb> g_simpleLineColorsRGB;         // pre-parsed for hot-path use
 
 int g_colorBlendWidth = 0;
-std::wstring g_colorInterpolation = L"smoothstep";
+ColorInterpolation g_colorInterp = INTERP_SMOOTHSTEP;
+// Precomputed pure-band boundaries for GetBlendedColor (aligned with
+// g_simpleLineColorsRGB). Built in LoadSettings.
+float g_colorBlendHalf = 0.0f;
+std::vector<float> g_colorBandStart;
+std::vector<float> g_colorBandEnd;
 
-std::vector<float> g_simpleLineOpacityValues; // parsed opacity values (0-100)
+std::vector<float> g_simpleLineOpacityValues; // parsed opacity alphas (0.0-1.0)
 
 ID2D1SolidColorBrush* g_pSimpleLineBrush = nullptr;
 ID2D1StrokeStyle* g_pStrokeStyle = nullptr;
@@ -197,7 +203,6 @@ ID2D1SolidColorBrush* g_pDebugBrushBlue = nullptr;
 // Cursor visual-center cache (avoids re-querying GetIconInfo every frame
 // when the cursor handle hasn't changed)
 HCURSOR g_cachedCursor = NULL;
-HCURSOR g_cachedBitmapCursor = NULL;  // separate cache for the WIC bitmap rebuild
 POINT g_cursorCenterOffset = { 0, 0 };  // added to hotspot to reach bitmap center (anchors debug boxes)
 POINT g_cursorVisualOffset = { 0, 0 };  // added to hotspot to reach visible-pixel center (trail origin)
 
@@ -211,13 +216,15 @@ POINT g_cursorVisualOffset = { 0, 0 };  // added to hotspot to reach visible-pix
 POINT g_frozenCursorOffset = { 0, 0 };
 
 std::mutex g_offsetMutex;  // protects g_cursorCenterOffset, g_cursorVisualOffset and g_frozenCursorOffset
+                            // (read by the poll thread). Does NOT protect the debug-dimension
+                            // globals below — those are render-thread-only.
                             // lock order: g_historyMutex (if needed) THEN g_offsetMutex
 
 
-// Cursor ghost style: cached D2D bitmap of the current cursor, rebuilt only
-// when the HCURSOR changes. g_cursorBitmap is owned by the render target and
-// must be released before the render target is released/recreated.
-ID2D1Bitmap* g_cursorBitmap = nullptr;
+// Cursor bitmap dimensions and DPI scale, cached per-HCURSOR by
+// UpdateCursorCenterOffset. Used by the debug outline boxes.
+// Render-thread-only: written by UpdateCursorCenterOffset and read by
+// SmearTimerProc, both on the overlay/render thread (no lock required).
 int g_cursorBmWidth = 0;
 int g_cursorBmHeight = 0;
 float g_cursorDpiScaleX = 1.0f;
@@ -225,6 +232,7 @@ float g_cursorDpiScaleY = 1.0f;
 
 // DEBUG: visible (alpha-trimmed) bounds of the cursor bitmap, in bitmap coords
 // (right/bottom exclusive). Temporary, used for the red debug box.
+// Render-thread-only (same ownership as the dimensions above).
 bool g_cursorVisibleValid = false;
 int g_cursorVisLeft = 0, g_cursorVisTop = 0, g_cursorVisRight = 0, g_cursorVisBottom = 0;
 
@@ -283,6 +291,37 @@ static bool ParseHexColor(const std::wstring& hex, float& r, float& g, float& b)
     return true;
 }
 
+// Reads a string setting, returning def when the setting is missing or empty.
+// Wh_FreeStringSetting is handled here; the returned copy is owned by the caller.
+static std::wstring ReadStringSetting(const wchar_t* key, const std::wstring& def) {
+    PCWSTR s = Wh_GetStringSetting(key);
+    std::wstring r = (s && *s) ? std::wstring(s) : def;
+    if (s) Wh_FreeStringSetting(s);
+    return r;
+}
+
+// Parses a comma-separated list of floats into out. Each value is clamped to
+// [minV, maxV]; invalid entries become onError. Falls back to defaultToken when
+// the setting is empty.
+static void ParseFloatList(const wchar_t* key, const std::wstring& defaultToken,
+                           float minV, float maxV, float onError,
+                           std::vector<float>& out) {
+    out.clear();
+    std::wstring raw = ReadStringSetting(key, L"");
+    std::vector<std::wstring> tokens = raw.empty() ? std::vector<std::wstring>() : SplitAndTrim(raw);
+    if (tokens.empty()) tokens.push_back(defaultToken);
+    for (const auto& tok : tokens) {
+        try {
+            float v = std::stof(tok);
+            if (v < minV) v = minV;
+            if (v > maxV) v = maxV;
+            out.push_back(v);
+        } catch (...) {
+            out.push_back(onError);
+        }
+    }
+}
+
 void LoadSettings() {
     g_tailOffsetX = Wh_GetIntSetting(L"tail_offset.x");
     g_tailOffsetY = Wh_GetIntSetting(L"tail_offset.y");
@@ -290,25 +329,11 @@ void LoadSettings() {
     g_debugShowOutline = Wh_GetIntSetting(L"debug.show_outline") != 0;
 
     // Trail mode
-    PCWSTR modeSetting = Wh_GetStringSetting(L"simpleLineOptions.trail_mode");
-    if (modeSetting && *modeSetting) {
-        g_trailMode = modeSetting;
-    } else {
-        g_trailMode = L"time_based";
-    }
-    if (modeSetting) Wh_FreeStringSetting(modeSetting);
+    g_sizeBased = ReadStringSetting(L"simpleLineOptions.trail_mode", L"time_based") == L"size_based";
 
-    PCWSTR aaSetting = Wh_GetStringSetting(L"simpleLineOptions.antialiasing");
-    g_antialiasing = !aaSetting || wcscmp(aaSetting, L"false") != 0;
-    if (aaSetting) Wh_FreeStringSetting(aaSetting);
+    g_antialiasing = ReadStringSetting(L"simpleLineOptions.antialiasing", L"true") != L"false";
 
-    PCWSTR originChangeSetting = Wh_GetStringSetting(L"simpleLineOptions.trail_origin_on_cursor_change");
-    if (originChangeSetting && *originChangeSetting) {
-        g_trailOriginOnCursorChange = originChangeSetting;
-    } else {
-        g_trailOriginOnCursorChange = L"smooth";
-    }
-    if (originChangeSetting) Wh_FreeStringSetting(originChangeSetting);
+    g_trailOriginOnCursorChange = ReadStringSetting(L"simpleLineOptions.trail_origin_on_cursor_change", L"smooth");
     if (g_trailOriginOnCursorChange != L"none" &&
         g_trailOriginOnCursorChange != L"immediate" &&
         g_trailOriginOnCursorChange != L"smooth") {
@@ -319,25 +344,15 @@ void LoadSettings() {
     g_tailSize = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.tail_size");
     g_sizeTimeout = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.timeout");
 
-    // Read the style setting (string — must be freed with Wh_FreeStringSetting)
-    PCWSTR styleSetting = Wh_GetStringSetting(L"style");
-    if (styleSetting && *styleSetting) {
-        g_activeStyle = styleSetting;
-    } else {
-        g_activeStyle = L"simple_line";  // fallback per RG-3
-    }
-    if (styleSetting) Wh_FreeStringSetting(styleSetting);
+    g_activeStyle = ReadStringSetting(L"style", L"simple_line");
 
     // RG-3: unknown style value → fallback to simple_line
     if (g_activeStyle != L"simple_line" && g_activeStyle != L"cursor_ghost") {
         g_activeStyle = L"simple_line";
     }
 
-    // Re-anchor the trail origin on cursor image changes only for the Simple
-    // line style; Cursor ghost keeps the frozen-origin behavior.
-    if (g_activeStyle != L"simple_line") {
-        g_trailOriginMode = ORIGIN_NONE;
-    } else if (g_trailOriginOnCursorChange == L"immediate") {
+    // Re-anchor the trail origin on cursor image changes.
+    if (g_trailOriginOnCursorChange == L"immediate") {
         g_trailOriginMode = ORIGIN_IMMEDIATE;
     } else if (g_trailOriginOnCursorChange == L"smooth") {
         g_trailOriginMode = ORIGIN_SMOOTH;
@@ -349,88 +364,55 @@ void LoadSettings() {
     if (g_tailSize < 20) g_tailSize = 20;
     if (g_sizeTimeout < 0) g_sizeTimeout = 0;
 
-    // Parse width values
-    g_simpleLineWidths.clear();
-    {
-        PCWSTR widthSetting = Wh_GetStringSetting(L"simpleLineOptions.width.values");
-        std::vector<std::wstring> widthTokens;
-        if (widthSetting && *widthSetting) {
-            widthTokens = SplitAndTrim(std::wstring(widthSetting));
-        }
-        if (widthTokens.empty()) {
-            widthTokens.push_back(L"1");
-        }
-        for (const auto& tok : widthTokens) {
-            try {
-                float w = std::stof(tok);
-                if (w < 1.0f) w = 1.0f;
-                g_simpleLineWidths.push_back(w);
-            } catch (...) {
-                g_simpleLineWidths.push_back(1.0f);
-            }
-        }
-        if (widthSetting) Wh_FreeStringSetting(widthSetting);
-    }
+    // Parse width values (min 1, no upper clamp)
+    ParseFloatList(L"simpleLineOptions.width.values", L"1", 1.0f, 1e30f, 1.0f, g_simpleLineWidths);
 
-    // Parse opacity values
-    g_simpleLineOpacityValues.clear();
-    {
-        PCWSTR opacSetting = Wh_GetStringSetting(L"simpleLineOptions.opacity.values");
-        std::vector<std::wstring> opacTokens;
-        if (opacSetting && *opacSetting) {
-            opacTokens = SplitAndTrim(std::wstring(opacSetting));
-        }
-        if (opacTokens.empty()) {
-            opacTokens.push_back(L"100");
-        }
-        for (const auto& tok : opacTokens) {
-            try {
-                float v = std::stof(tok);
-                if (v < 0.0f) v = 0.0f;
-                if (v > 100.0f) v = 100.0f;
-                g_simpleLineOpacityValues.push_back(v);
-            } catch (...) {
-                g_simpleLineOpacityValues.push_back(100.0f);
-            }
-        }
-        if (opacSetting) Wh_FreeStringSetting(opacSetting);
-    }
+    // Parse opacity values (percentages 0-100), then convert to 0-1 alphas.
+    ParseFloatList(L"simpleLineOptions.opacity.values", L"100", 0.0f, 100.0f, 100.0f, g_simpleLineOpacityValues);
+    for (float& v : g_simpleLineOpacityValues) v /= 100.0f;
 
     // Parse color values
-    PCWSTR colorSetting = Wh_GetStringSetting(L"simpleLineOptions.color.values");
-    if (colorSetting && *colorSetting) {
-        g_simpleLineColorHex = colorSetting;
-    } else {
-        g_simpleLineColorHex = L"000000";
-    }
-    if (colorSetting) Wh_FreeStringSetting(colorSetting);
-
-    g_simpleLineColors.clear();
-    g_simpleLineColors = SplitAndTrim(g_simpleLineColorHex);
-    if (g_simpleLineColors.empty()) {
-        g_simpleLineColors.push_back(L"000000");
-    }
-
     g_simpleLineColorsRGB.clear();
-    for (const auto& hex : g_simpleLineColors) {
-        Rgb rgb;
-        if (!ParseHexColor(hex, rgb.r, rgb.g, rgb.b)) {
-            rgb = { 0, 0, 0 };
+    {
+        std::wstring colorSetting = ReadStringSetting(L"simpleLineOptions.color.values", L"000000");
+        std::vector<std::wstring> colorTokens = SplitAndTrim(colorSetting);
+        if (colorTokens.empty()) {
+            colorTokens.push_back(L"000000");
         }
-        g_simpleLineColorsRGB.push_back(rgb);
+        for (const auto& hex : colorTokens) {
+            Rgb rgb;
+            if (!ParseHexColor(hex, rgb.r, rgb.g, rgb.b)) {
+                rgb = { 0, 0, 0 };
+            }
+            g_simpleLineColorsRGB.push_back(rgb);
+        }
     }
 
     g_colorBlendWidth = Wh_GetIntSetting(L"simpleLineOptions.color.blend_width");
     if (g_colorBlendWidth < 0) g_colorBlendWidth = 0;
     if (g_colorBlendWidth > 100) g_colorBlendWidth = 100;
 
-    PCWSTR interpSetting = Wh_GetStringSetting(L"simpleLineOptions.color.interpolation");
-    if (interpSetting && *interpSetting) {
-        g_colorInterpolation = interpSetting;
-    } else {
-        g_colorInterpolation = L"smoothstep";
+    std::wstring interp = ReadStringSetting(L"simpleLineOptions.color.interpolation", L"smoothstep");
+    if (interp == L"ease_in")      g_colorInterp = INTERP_EASE_IN;
+    else if (interp == L"ease_out") g_colorInterp = INTERP_EASE_OUT;
+    else if (interp == L"smoothstep") g_colorInterp = INTERP_SMOOTHSTEP;
+    else                            g_colorInterp = INTERP_LINEAR;
+
+    // Precompute pure-band boundaries for GetBlendedColor.
+    g_colorBlendHalf = (g_colorBlendWidth / 100.0f) / 2.0f;
+    g_colorBandStart.clear();
+    g_colorBandEnd.clear();
+    {
+        size_t N = g_simpleLineColorsRGB.size();
+        g_colorBandStart.reserve(N);
+        g_colorBandEnd.reserve(N);
+        for (size_t i = 0; i < N; ++i) {
+            float start = (i == 0) ? 0.0f : (float)i / (float)N + g_colorBlendHalf;
+            float end = (i == N - 1) ? 1.0f : (float)(i + 1) / (float)N - g_colorBlendHalf;
+            g_colorBandStart.push_back(start);
+            g_colorBandEnd.push_back(end);
+        }
     }
-    if (interpSetting) Wh_FreeStringSetting(interpSetting);
 }
 
 static void FreeIconInfoBitmaps(ICONINFO& ii) {
@@ -565,6 +547,8 @@ void UpdateCursorCenterOffset() {
         g_cursorCenterOffset = { 0, 0 };
         g_cursorVisualOffset = { 0, 0 };
         g_cursorVisibleValid = false;
+        g_cursorBmWidth = 0;
+        g_cursorBmHeight = 0;
         g_cachedCursor = NULL;
         return;
     }
@@ -579,6 +563,8 @@ void UpdateCursorCenterOffset() {
         g_cursorCenterOffset = { 0, 0 };
         g_cursorVisualOffset = { 0, 0 };
         g_cursorVisibleValid = false;
+        g_cursorBmWidth = 0;
+        g_cursorBmHeight = 0;
         g_cachedCursor = NULL;
         return;
     }
@@ -592,6 +578,12 @@ void UpdateCursorCenterOffset() {
         GetActualCursorSize(actualX, actualY);
         float sx = (float)actualX / (float)bmWidth;
         float sy = (float)actualY / (float)bmHeight;
+
+        // Cache the bitmap dimensions and DPI scale for the debug outline boxes.
+        g_cursorBmWidth = bmWidth;
+        g_cursorBmHeight = bmHeight;
+        g_cursorDpiScaleX = sx;
+        g_cursorDpiScaleY = sy;
 
         // Bitmap center (anchors the debug outline boxes).
         g_cursorCenterOffset.x = (int)(((bmWidth / 2.0f) - (int)ii.xHotspot) * sx + 0.5f);
@@ -612,92 +604,13 @@ void UpdateCursorCenterOffset() {
         g_cursorCenterOffset = { 0, 0 };
         g_cursorVisualOffset = { 0, 0 };
         g_cursorVisibleValid = false;
+        g_cursorBmWidth = 0;
+        g_cursorBmHeight = 0;
     }
 
     FreeIconInfoBitmaps(ii);
 
     g_cachedCursor = ci.hCursor;
-}
-
-// Rebuild the cached D2D bitmap of the current cursor. Called when the cursor
-// shape changes (HCURSOR differs from g_cachedBitmapCursor). Uses WIC to convert
-// the GDI HBITMAP from GetIconInfo into an ID2D1Bitmap compatible with the render
-// target. Monochrome cursors (no hbmColor) are handled via the mask bitmap.
-void UpdateCursorBitmap() {
-    CURSORINFO ci = { sizeof(CURSORINFO) };
-    if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
-        if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
-        g_cachedBitmapCursor = NULL;
-        g_cursorBmWidth = 0;
-        g_cursorBmHeight = 0;
-        return;
-    }
-
-    // Separate cache from g_cachedCursor (which UpdateCursorCenterOffset updates
-    // first): rebuild only when the cursor handle actually changes.
-    if (ci.hCursor == g_cachedBitmapCursor && g_cursorBitmap) {
-        return;
-    }
-
-    ICONINFO ii = { };
-    if (!GetIconInfo(ci.hCursor, &ii)) {
-        if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
-        g_cachedBitmapCursor = NULL;
-        g_cursorBmWidth = 0;
-        g_cursorBmHeight = 0;
-        return;
-    }
-
-    int bmWidth = 0, bmHeight = 0;
-    HBITMAP hbmToUse = NULL;
-    ResolveCursorBitmapDimensions(ii, bmWidth, bmHeight, hbmToUse);
-
-    if (!hbmToUse || bmWidth <= 0 || bmHeight <= 0) {
-        FreeIconInfoBitmaps(ii);
-        if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
-        g_cachedBitmapCursor = NULL;
-        g_cursorBmWidth = 0;
-        g_cursorBmHeight = 0;
-        return;
-    }
-
-    // Convert the HBITMAP to an ID2D1Bitmap via WIC.
-    // Steps: HBITMAP → IWICBitmapSource (via IWICImagingFactory::CreateBitmapFromHBITMAP)
-    //      → ID2D1Bitmap (via render target CreateBitmapFromWicBitmap)
-    if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
-
-    if (g_pDCRenderTarget) {
-        // Create WIC factory
-        IWICImagingFactory* pWicFactory = nullptr;
-        HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
-                                      IID_PPV_ARGS(&pWicFactory));
-        if (SUCCEEDED(hr) && pWicFactory) {
-            IWICBitmap* pWicBitmap = nullptr;
-            hr = pWicFactory->CreateBitmapFromHBITMAP(hbmToUse, NULL,
-                WICBitmapUsePremultipliedAlpha, &pWicBitmap);
-            if (SUCCEEDED(hr) && pWicBitmap) {
-                UINT w = 0, h = 0;
-                pWicBitmap->GetSize(&w, &h);
-                // Create the D2D bitmap from the WIC bitmap
-                hr = g_pDCRenderTarget->CreateBitmapFromWicBitmap(pWicBitmap, nullptr, &g_cursorBitmap);
-                if (SUCCEEDED(hr) && g_cursorBitmap) {
-                    g_cursorBmWidth = (int)w;
-                    g_cursorBmHeight = (int)h;
-                    int actualX = 0, actualY = 0;
-                    GetActualCursorSize(actualX, actualY);
-                    g_cursorDpiScaleX = (float)actualX / (float)w;
-                    g_cursorDpiScaleY = (float)actualY / (float)h;
-                }
-
-                pWicBitmap->Release();
-            }
-            pWicFactory->Release();
-        }
-    }
-
-    g_cachedBitmapCursor = ci.hCursor;
-
-    FreeIconInfoBitmaps(ii);
 }
 
 bool IsGameRunning() {
@@ -750,14 +663,29 @@ bool IsGameRunning() {
     return false;
 }
 
-// Blend model: each of the N-1 transitions gets a blend zone of
-// width (blendWidth/100)/(N-1), centered on the boundary. Outside
-// blend zones, pure colors. Inside, smoothstep. Overlapping zones
-// merge into a multi-color gradient.
-static void GetBlendedColor(const std::vector<Rgb>& colors,
-                            int blendWidth,
-                            float ratio,
-                            float& r, float& g, float& b) {
+// Applies an easing curve to t (expected in [0,1]).
+static float Ease(float t, ColorInterpolation mode) {
+    switch (mode) {
+        case INTERP_EASE_IN:    return t * t;
+        case INTERP_EASE_OUT:   return 1.0f - (1.0f - t) * (1.0f - t);
+        case INTERP_SMOOTHSTEP: return t * t * (3.0f - 2.0f * t);
+        case INTERP_LINEAR:
+        default:                return t;
+    }
+}
+
+// Rounds a float to the nearest LONG, away from zero.
+static LONG RoundToLong(float v) {
+    return (LONG)(v + (v >= 0.0f ? 0.5f : -0.5f));
+}
+
+// Blend model: each of the N-1 transitions gets a blend zone of width
+// (blendWidth/100), centered on the boundary. Outside blend zones, pure
+// colors; inside, the configured easing curve. With more than two colors the
+// zones overlap, merging into a multi-color gradient. Reads the precomputed
+// band boundaries from LoadSettings.
+static void GetBlendedColor(float ratio, float& r, float& g, float& b) {
+    const std::vector<Rgb>& colors = g_simpleLineColorsRGB;
     r = 0.0f; g = 0.0f; b = 0.0f;
     if (colors.empty()) return;
     if (colors.size() == 1) {
@@ -766,15 +694,12 @@ static void GetBlendedColor(const std::vector<Rgb>& colors,
     }
 
     int N = (int)colors.size();
-    float totalBlend = (float)blendWidth / 100.0f;
-    float perTrans = totalBlend;
-    float half = perTrans / 2.0f;
+    float half = g_colorBlendHalf;
 
     // Check pure bands first
     for (int i = 0; i < N; ++i) {
-        float bandStart = (i == 0) ? 0.0f : (float)i / (float)N + half;
-        float bandEnd   = (i == N - 1) ? 1.0f : (float)(i + 1) / (float)N - half;
-        if (bandEnd > bandStart && ratio >= bandStart && ratio <= bandEnd) {
+        if (g_colorBandEnd[i] > g_colorBandStart[i] &&
+            ratio >= g_colorBandStart[i] && ratio <= g_colorBandEnd[i]) {
             r = colors[i].r; g = colors[i].g; b = colors[i].b;
             return;
         }
@@ -809,24 +734,15 @@ static void GetBlendedColor(const std::vector<Rgb>& colors,
     }
     float frac = (ratio - zoneStart) / span;
 
-    if (g_colorInterpolation == L"ease_in")     frac = frac * frac;
-    else if (g_colorInterpolation == L"ease_out")    frac = 1.0f - (1.0f - frac) * (1.0f - frac);
-    else if (g_colorInterpolation == L"smoothstep")  frac = frac * frac * (3.0f - 2.0f * frac);
+    frac = Ease(frac, g_colorInterp);
 
-    // Build positions for the colors involved in this blended region
+    // Colors are evenly spaced within the blend region, so the index and
+    // fraction are computed directly (no position array allocation).
     int numColors = lastZone - firstZone + 2;
-    std::vector<float> pos;
-    for (int i = 0; i < numColors; ++i)
-        pos.push_back((float)i / (float)(numColors - 1));
-    if (pos.back() < 1.0f) pos.push_back(1.0f);
-
-    size_t idx = 0;
-    for (size_t i = 0; i + 1 < pos.size(); ++i) {
-        if (frac >= pos[i] && frac < pos[i + 1]) { idx = i; break; }
-    }
-    if (frac >= 1.0f) idx = pos.size() - 2;
-
-    float f = (frac - pos[idx]) / (pos[idx + 1] - pos[idx]);
+    float scaled = frac * (float)(numColors - 1);
+    size_t idx = (size_t)scaled;
+    if (idx > (size_t)(numColors - 2)) idx = (size_t)(numColors - 2);
+    float f = scaled - (float)idx;
 
     const auto& c0 = colors[firstZone + (int)idx];
     const auto& c1 = colors[firstZone + (int)idx + 1];
@@ -835,54 +751,28 @@ static void GetBlendedColor(const std::vector<Rgb>& colors,
     b = c0.b + (c1.b - c0.b) * f;
 }
 
-static float Clamp01(float v) {
-    if (v < 0.0f) return 0.0f;
-    if (v > 1.0f) return 1.0f;
-    return v;
-}
-
-// Interpolates a single float value across equal shares, using the same
-// smoothstep interpolation as GetBlendedColor.
+// Interpolates a single float value across equal shares, using smoothstep
+// (same as the color blend easing). Stops are evenly spaced, so the index and
+// fraction are computed directly without building a position array.
 static float InterpolateWidth(const std::vector<float>& values,
                               float ratio) {
     if (values.empty()) return 1.0f;
     if (values.size() == 1) return values[0];
 
-    float n = (float)values.size();
-    std::vector<float> pos;
-    for (size_t i = 0; i < values.size(); ++i)
-        pos.push_back((float)i / (n - 1.0f));
-    if (pos.back() < 1.0f) pos.push_back(1.0f);
-
-    if (ratio <= pos[0]) return values[0];
+    size_t n = values.size();
+    if (ratio <= 0.0f) return values.front();
     if (ratio >= 1.0f) return values.back();
 
-    size_t idx = 0;
-    for (size_t i = 0; i + 1 < pos.size(); ++i) {
-        if (ratio >= pos[i] && ratio < pos[i + 1]) {
-            idx = i;
-            break;
-        }
-    }
+    float scaled = ratio * (float)(n - 1);
+    size_t idx = (size_t)scaled;
+    if (idx > n - 2) idx = n - 2;
+    float frac = Ease(scaled - (float)idx, INTERP_SMOOTHSTEP);
 
-    float spanStart = pos[idx];
-    float spanEnd   = pos[idx + 1];
-    float span      = spanEnd - spanStart;
-    if (span <= 0.0f) return values[idx];
-    float frac = (ratio - spanStart) / span;
-    if (frac < 0.0f) frac = 0.0f;
-    if (frac > 1.0f) frac = 1.0f;
-
-    frac = frac * frac * (3.0f - 2.0f * frac);
-
-    size_t vi = (idx + 1 < values.size()) ? idx + 1 : idx;
-    return values[idx] + (values[vi] - values[idx]) * frac;
+    return values[idx] + (values[idx + 1] - values[idx]) * frac;
 }
 
-static float InterpolateOpacity(const std::vector<float>& values,
-                                 float ratio) {
-    float raw = InterpolateWidth(values, ratio);
-    float alpha = raw / 100.0f;
+static float InterpolateOpacity(float ratio) {
+    float alpha = InterpolateWidth(g_simpleLineOpacityValues, ratio);
     if (alpha < 0.0f) alpha = 0.0f;
     if (alpha > 1.0f) alpha = 1.0f;
     return alpha;
@@ -913,12 +803,12 @@ void RenderSimpleLineStyle(const std::vector<D2D1_POINT_2F>& smoothed) {
     size_t segCount = smoothed.size() - 1;
     for (size_t i = 0; i < segCount; ++i) {
         float ratio = (segCount > 1) ? (float)i / (float)(segCount - 1) : 0.0f;
-        float alpha = InterpolateOpacity(g_simpleLineOpacityValues, ratio);
+        float alpha = InterpolateOpacity(ratio);
         float strokeWidth = InterpolateWidth(g_simpleLineWidths, ratio);
         if (strokeWidth < 0.5f) strokeWidth = 0.5f;
 
         float gr, gg, gb;
-        GetBlendedColor(g_simpleLineColorsRGB, g_colorBlendWidth, ratio, gr, gg, gb);
+        GetBlendedColor(ratio, gr, gg, gb);
 
         g_pSimpleLineBrush->SetColor(D2D1::ColorF(gr * alpha, gg * alpha, gb * alpha, alpha));
         g_pDCRenderTarget->DrawLine(smoothed[i], smoothed[i + 1], g_pSimpleLineBrush,
@@ -926,39 +816,14 @@ void RenderSimpleLineStyle(const std::vector<D2D1_POINT_2F>& smoothed) {
     }
 }
 
-// Render the "Cursor ghost" style: stamped copies of the current cursor icon
-// placed along the smoothed trail path, with opacity fading from the head
-// (near the real cursor, most opaque) to the tail (transparent). Reuses the
-// opacity settings.
-void RenderCursorGhostStyle(const std::vector<D2D1_POINT_2F>& smoothed) {
-    if (smoothed.empty()) return;
-    if (!g_pDCRenderTarget) return;
-    if (!g_cursorBitmap || g_cursorBmWidth <= 0 || g_cursorBmHeight <= 0) return;
-
-    size_t n = smoothed.size();
-    D2D1_RECT_F srcRect = D2D1::RectF(0.0f, 0.0f,
-                                      (FLOAT)g_cursorBmWidth,
-                                      (FLOAT)g_cursorBmHeight);
-
-    for (size_t i = 0; i < n; ++i) {
-        float ratio = (n > 1) ? (float)i / (float)(n - 1) : 0.0f;
-        float alpha = InterpolateOpacity(g_simpleLineOpacityValues, ratio);
-
-        float scaledW = g_cursorBmWidth * g_cursorDpiScaleX;
-        float scaledH = g_cursorBmHeight * g_cursorDpiScaleY;
-
-        // Center the cursor bitmap on the smoothed path point.
-        // g_cursorCenterOffset shifts from hotspot to visual center.
-        float cx = smoothed[i].x - scaledW / 2.0f;
-        float cy = smoothed[i].y - scaledH / 2.0f;
-        D2D1_RECT_F destRect = D2D1::RectF(cx, cy,
-                                           cx + scaledW,
-                                           cy + scaledH);
-
-        g_pDCRenderTarget->DrawBitmap(g_cursorBitmap, &destRect, alpha,
-                                      D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                                      &srcRect);
-    }
+// Time-based eviction: drop samples older than g_tailDuration, then cap the
+// total count. Caller must hold g_historyMutex.
+static void EvictByTime(DWORD now) {
+    while (!g_history.empty() && (now - g_history.back().t) > (DWORD)g_tailDuration)
+        g_history.pop_back();
+    const size_t kMaxSamples = (size_t)(g_tailDuration);
+    while (g_history.size() > kMaxSamples)
+        g_history.pop_back();
 }
 
 // High-frequency cursor polling thread.
@@ -990,7 +855,7 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             // even when the cursor is stationary (duplicate-skip would otherwise
             // continue before reaching eviction, freezing the trail).
             DWORD now = timeGetTime();
-            if (g_trailMode == L"size_based") {
+            if (g_sizeBased) {
                 if ((g_sizeTimeout > 0 && g_lastMovementTime > 0 &&
                      now - g_lastMovementTime > g_sizeTimeout) ||
                     g_cursorHidden.load()) {
@@ -1004,11 +869,7 @@ DWORD WINAPI PollThreadProc(LPVOID) {
                             }
                         }
                     }
-                    while (!g_history.empty() && (now - g_history.back().t) > (DWORD)g_tailDuration)
-                        g_history.pop_back();
-                    const size_t kMaxSamples = (size_t)(g_tailDuration);
-                    while (g_history.size() > kMaxSamples)
-                        g_history.pop_back();
+                    EvictByTime(now);
                 } else {
                     g_isFading = false;
                     // Distance-based eviction: walk from head (newest)
@@ -1029,11 +890,7 @@ DWORD WINAPI PollThreadProc(LPVOID) {
                     }
                 }
             } else {
-                while (!g_history.empty() && (now - g_history.back().t) > (DWORD)g_tailDuration)
-                    g_history.pop_back();
-                const size_t kMaxSamples = (size_t)(g_tailDuration);
-                while (g_history.size() > kMaxSamples)
-                    g_history.pop_back();
+                EvictByTime(now);
             }
 
             // === CURSOR HIDDEN — stop sampling so the trail fades out ===
@@ -1099,7 +956,7 @@ DWORD WINAPI PollThreadProc(LPVOID) {
                 // (size_based), over a third of the configured tail value.
                 if (g_originTransitioning) {
                     float p;
-                    if (g_trailMode == L"size_based") {
+                    if (g_sizeBased) {
                         g_originProgressDist += dist;
                         float len = (float)(g_tailSize / 3);
                         if (len < 1.0f) len = 1.0f;
@@ -1110,7 +967,7 @@ DWORD WINAPI PollThreadProc(LPVOID) {
                         p = (float)(now - g_originStartTime) / len;
                     }
                     if (p > 1.0f) p = 1.0f;
-                    float e = p * p * (3.0f - 2.0f * p);
+                    float e = Ease(p, INTERP_SMOOTHSTEP);
                     g_smoothedOffsetX = g_originFromX + (g_originTarget.x - g_originFromX) * e;
                     g_smoothedOffsetY = g_originFromY + (g_originTarget.y - g_originFromY) * e;
                     if (p >= 1.0f) g_originTransitioning = false;
@@ -1119,8 +976,8 @@ DWORD WINAPI PollThreadProc(LPVOID) {
                     g_smoothedOffsetY = (float)target.y;
                 }
 
-                originOffset.x = (LONG)(g_smoothedOffsetX + (g_smoothedOffsetX >= 0 ? 0.5f : -0.5f));
-                originOffset.y = (LONG)(g_smoothedOffsetY + (g_smoothedOffsetY >= 0 ? 0.5f : -0.5f));
+                originOffset.x = RoundToLong(g_smoothedOffsetX);
+                originOffset.y = RoundToLong(g_smoothedOffsetY);
             } else {
                 std::lock_guard<std::mutex> offsetLock(g_offsetMutex);
                 if (g_history.empty()) {
@@ -1202,7 +1059,6 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
         // Time-based eviction retracts the trail naturally when the cursor
         // stops. The render thread only draws what's in g_history.
         UpdateCursorCenterOffset();
-        UpdateCursorBitmap();
     }
 
     // Snapshot the current history size to decide whether to draw.
@@ -1229,7 +1085,6 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
 
             // If the bitmap changed, the render target needs to be rebuilt to match it
             if (g_pDCRenderTarget) {
-                if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
                 if (g_pSimpleLineBrush) { g_pSimpleLineBrush->Release(); g_pSimpleLineBrush = nullptr; }
                 if (g_pDebugBrush) { g_pDebugBrush->Release(); g_pDebugBrush = nullptr; }
                 if (g_pDebugBrushRed) { g_pDebugBrushRed->Release(); g_pDebugBrushRed = nullptr; }
@@ -1277,7 +1132,7 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
             // Adaptive min distance: smaller kMinDist for longer trails so
             // decimation keeps enough waypoints. Scales inversely with kMaxPoints,
             // clamped to [2, 6].
-            size_t kMaxPoints = (g_trailMode == L"size_based")
+            size_t kMaxPoints = g_sizeBased
                 ? (size_t)g_tailSize
                 : (size_t)g_tailDuration;
             if (kMaxPoints < 2) kMaxPoints = 2;
@@ -1367,7 +1222,7 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
                     if (p.y < minY) minY = p.y;
                     if (p.y > maxY) maxY = p.y;
                 }
-                // Expand for stroke width / cursor ghost bitmap / anti-aliasing
+                // Expand for stroke width / anti-aliasing
                 int margin = 32;
                 if (!g_simpleLineWidths.empty()) {
                     float maxW = g_simpleLineWidths[0];
@@ -1375,9 +1230,6 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
                         if (w > maxW) maxW = w;
                     }
                     margin = (int)maxW + 16;
-                }
-                if (g_activeStyle == L"cursor_ghost" && g_cursorBmWidth > 0) {
-                    margin = (g_cursorBmWidth > g_cursorBmHeight ? g_cursorBmWidth : g_cursorBmHeight) + 16;
                 }
                 curBBox.left   = (LONG)minX - margin;
                 curBBox.top    = (LONG)minY - margin;
@@ -1388,8 +1240,6 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
                 // Step 4 — Dispatch to active style renderer
                 if (g_activeStyle == L"simple_line") {
                     RenderSimpleLineStyle(smoothed);
-                } else if (g_activeStyle == L"cursor_ghost") {
-                    RenderCursorGhostStyle(smoothed);
                 }
                 // Future styles: add else-if branches here, e.g.
                 // else if (g_activeStyle == L"glow") { RenderGlowStyle(smoothed); }
@@ -1475,7 +1325,6 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
 
             HRESULT hr = g_pDCRenderTarget->EndDraw();
             if (hr == D2DERR_RECREATE_TARGET) {
-                if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
                 if (g_pSimpleLineBrush) { g_pSimpleLineBrush->Release(); g_pSimpleLineBrush = nullptr; }
                 if (g_pDebugBrush) { g_pDebugBrush->Release(); g_pDebugBrush = nullptr; }
                 if (g_pDebugBrushRed) { g_pDebugBrushRed->Release(); g_pDebugBrushRed = nullptr; }
@@ -1678,7 +1527,6 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     }
 
     // Clean up our massive GPU footprint before checking out
-    if (g_cursorBitmap) { g_cursorBitmap->Release(); g_cursorBitmap = nullptr; }
     if (g_pSimpleLineBrush) { g_pSimpleLineBrush->Release(); g_pSimpleLineBrush = nullptr; }
     if (g_pDebugBrush) { g_pDebugBrush->Release(); g_pDebugBrush = nullptr; }
     if (g_pDebugBrushRed) { g_pDebugBrushRed->Release(); g_pDebugBrushRed = nullptr; }

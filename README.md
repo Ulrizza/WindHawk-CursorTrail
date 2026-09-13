@@ -5,7 +5,6 @@ A [Windhawk](https://windhawk.net) mod that renders a customizable cursor trail 
 ## Styles
 
 - **Simple line** — A thin polyline with configurable width, color(s), gradient stops, and per-segment opacity.
-- **Cursor ghost** — Stamped copies of the current cursor icon along the trail path, fading out toward the tail.
 
 ## How it works
 
