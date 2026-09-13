@@ -13,6 +13,7 @@ A [Windhawk](https://windhawk.net) mod that renders a customizable cursor trail 
 - A render thread draws sampled points via a layered (`WS_EX_LAYERED`) topmost transparent window, using Direct2D with per-pixel alpha via `UpdateLayeredWindow`.
 - Point positions are spatially decimated and smoothed with Chaikin subdivision before rendering.
 - Trail segments automatically expire after the configured tail duration. The overlay is paused when a fullscreen exclusive (game) application is detected.
+- When the cursor is hidden (e.g. Windows' hide-while-typing), the trail fades out over the tail duration in both trail modes.
 
 ## Settings
 

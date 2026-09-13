@@ -125,6 +125,7 @@ std::mutex g_historyMutex;          // protects g_history (accessed by poll + re
 HANDLE g_pollThread = NULL;
 HANDLE g_pollStopEvent = NULL;
 std::atomic<bool> g_isGameRunning(false); // set by render thread, read by poll thread
+std::atomic<bool> g_cursorHidden(false);  // set by render thread, read by poll thread
 std::atomic<bool> g_renderScheduled(false); // set by MMTimerCallback, cleared by the overlay thread
 int g_sampleRate = 1;               // polling interval in ms
 // Direct2D globals
@@ -560,12 +561,14 @@ void UpdateCursorCenterOffset() {
 
     CURSORINFO ci = { sizeof(CURSORINFO) };
     if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
+        g_cursorHidden.store(true);
         g_cursorCenterOffset = { 0, 0 };
         g_cursorVisualOffset = { 0, 0 };
         g_cursorVisibleValid = false;
         g_cachedCursor = NULL;
         return;
     }
+    g_cursorHidden.store(false);
 
     if (ci.hCursor == g_cachedCursor) {
         return;  // same cursor as last frame, reuse cached offset
@@ -988,8 +991,9 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             // continue before reaching eviction, freezing the trail).
             DWORD now = timeGetTime();
             if (g_trailMode == L"size_based") {
-                if (g_sizeTimeout > 0 && g_lastMovementTime > 0 &&
-                    now - g_lastMovementTime > g_sizeTimeout) {
+                if ((g_sizeTimeout > 0 && g_lastMovementTime > 0 &&
+                     now - g_lastMovementTime > g_sizeTimeout) ||
+                    g_cursorHidden.load()) {
                     if (!g_isFading) {
                         g_isFading = true;
                         size_t n = g_history.size();
@@ -1030,6 +1034,15 @@ DWORD WINAPI PollThreadProc(LPVOID) {
                 const size_t kMaxSamples = (size_t)(g_tailDuration);
                 while (g_history.size() > kMaxSamples)
                     g_history.pop_back();
+            }
+
+            // === CURSOR HIDDEN — stop sampling so the trail fades out ===
+            // Eviction above has already run, so the trail retracts over the
+            // tail duration (size-based re-timestamped by the fade path). No
+            // new samples are pushed until the cursor is shown again.
+            if (g_cursorHidden.load()) {
+                g_lastOriginCursorValid = false;
+                continue;
             }
 
             // === TRAIL ORIGIN — choose the offset for this sample ===
