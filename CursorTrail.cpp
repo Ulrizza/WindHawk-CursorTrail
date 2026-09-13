@@ -17,20 +17,20 @@
 /*
 - style: simple_line
   $name: Style
-  $description: Trail rendering style (simple_line or cursor_ghost)
+  $description: Type of trail
   $options:
   - simple_line: Simple line
   - cursor_ghost: Cursor ghost
 - simpleLineOptions:
   - trail_mode: "time_based"
     $name: Trail mode
-    $description: Time based fades the trail over time; Size based keeps a fixed number of trail points even when stationary
+    $description: Time based fades the trail over time; Size based keeps a fixed trail length even when the cursor stops
     $options:
     - time_based: Time based
     - size_based: Size based
   - antialiasing: "true"
     $name: Antialiasing
-    $description: Smooth the trail edges (disable for hard, pixelated edges)
+    $description: Smooth the trail edges
     $options:
     - "true": "True"
     - "false": "False"
@@ -44,12 +44,12 @@
   - timeBased:
     - tail_duration: 500
       $name: Tail duration
-      $description: Milliseconds each trail segment stays visible (minimum 20)
+      $description: How long each trail segment stays visible, in milliseconds. Minimum 20.
     $name: Time based
   - sizeBased:
     - tail_size: 2000
       $name: Tail length
-      $description: Maximum trail length in pixels (minimum 20)
+      $description: Maximum trail length in pixels. Minimum 20.
     - timeout: 2000
       $name: Timeout
       $description: Milliseconds of inactivity before the trail starts fading (using the Time based tail duration). 0 = trail always visible.
@@ -57,18 +57,18 @@
   - width:
     - values: "2,1"
       $name: Values
-      $description: "Comma-separated stroke widths from head to tail (e.g. \"2,1\" for a tapered trail, or \"10,1,10,1\" for a pulsing trail). Each value gets an equal share; repeat to widen (e.g. \"2,2,2,2,1\" = 80%% at 2, 20%% at 1). Minimum 1."
+      $description: "Comma-separated stroke widths in pixels from head to tail (e.g. \"2,1\" for a tapered trail, or \"10,1,10,1\" for a pulsing trail). Each value gets an equal share; repeat to widen (e.g. \"2,2,2,2,1\" = 80%% at 2, 20%% at 1). Minimum 1."
     $name: Width
   - color:
     - values: "FF0000,FF7F00,FFFF00,7FFF00,00FF00,00FFFF,0000FF,4B0082,8B00FF"
       $name: Values
-      $description: "Line color for the Simple line style. Single hex (RRGGBB without #, e.g. 000000 for black) or comma-separated list for a gradient from head to tail (e.g. 000000,FF0000,FFFFFF for black->red->white). Each color gets an equal share; repeat to widen. Invalid entries are skipped."
+      $description: "Single hex (RRGGBB without #, e.g. 000000 for black) or comma-separated list for a gradient from head to tail (e.g. 000000,FF0000,FFFFFF for black->red->white). Each color gets an equal share; repeat to widen. Invalid entries are skipped."
     - blend_width: 100
       $name: Blend width
       $description: Percentage of each transition spent blending (0 = pure bands, 100 = full gradient). 50 with red,blue gives 25% hard red, 50% blend, 25% hard blue.
     - interpolation: "smoothstep"
       $name: Interpolation
-      $description: Blending curve between colors
+      $description: Easing curve used to blend between colors
       $options:
       - linear: Linear
       - smoothstep: Smoothstep
@@ -84,10 +84,10 @@
 - tail_offset:
   - x: 0
     $name: X
-    $description: Fine-tune the trail origin horizontally (auto-centered by default, 0 = no adjustment)
+    $description: Fine-tune the trail origin horizontally in pixels (auto-centered by default, 0 = no adjustment)
   - y: 0
     $name: Y
-    $description: Fine-tune the trail origin vertically (auto-centered by default, 0 = no adjustment)
+    $description: Fine-tune the trail origin vertically in pixels (auto-centered by default, 0 = no adjustment)
   $name: Trail offset
 - debug:
   - show_outline: false
