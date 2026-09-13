@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.12
+- Added "Trail origin on cursor change" setting for the Simple line style: `none` keeps the trail origin frozen, `immediate` snaps to the new cursor's visual center, and `smooth` (default) glides there with an ease-in-out transition when the cursor image changes (e.g. arrow to I-beam).
+
 ## 0.11
 - Fixed opacity not visibly changing: brush colors now use premultiplied alpha to match the D2D render target pixel format, so per-segment opacity values render correctly.
 

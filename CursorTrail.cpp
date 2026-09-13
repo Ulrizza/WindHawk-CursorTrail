@@ -2,7 +2,7 @@
 // @id              cursor-trail
 // @name            Cursor trail
 // @description     Cursor trail overlay with configurable styles (simple line, cursor ghost)
-// @version         0.11
+// @version         0.12
 // @author          Ulrizza
 // @license         MIT
 // @include         windhawk.exe
