@@ -34,6 +34,13 @@
     $options:
     - "true": "True"
     - "false": "False"
+  - trail_origin_on_cursor_change: "smooth"
+    $name: Trail origin on cursor change
+    $description: "What the trail origin does when the cursor image changes: None freezes it, Immediate snaps to the new cursor center, Smooth glides with an ease-in-out transition."
+    $options:
+    - none: None
+    - immediate: Immediate
+    - smooth: Smooth
   - timeBased:
     - tail_duration: 500
       $name: Tail duration
@@ -135,6 +142,23 @@ int g_tailOffsetX = 0;
 int g_tailOffsetY = 0;
 int g_tailDuration = 1000;
 std::wstring g_trailMode = L"time_based";
+std::wstring g_trailOriginOnCursorChange = L"smooth";  // raw setting
+
+// How the trail origin reacts to cursor image changes (Simple line only).
+enum TrailOriginMode { ORIGIN_NONE, ORIGIN_IMMEDIATE, ORIGIN_SMOOTH };
+TrailOriginMode g_trailOriginMode = ORIGIN_SMOOTH;
+
+// Ease-in-out origin transition state (poll-thread owned).
+float g_originFromX = 0.0f, g_originFromY = 0.0f;  // value at transition start
+POINT g_originTarget = { 0, 0 };                    // current target offset
+float g_smoothedOffsetX = 0.0f, g_smoothedOffsetY = 0.0f;
+DWORD g_originStartTime = 0;                        // time_based transition start
+float g_originProgressDist = 0.0f;                  // size_based distance travelled
+bool g_originTransitioning = false;
+bool g_originInitialized = false;
+POINT g_lastOriginCursorPos = { 0, 0 };             // for distance accumulation
+bool g_lastOriginCursorValid = false;
+
 int g_tailSize = 2000;
 bool g_antialiasing = true;
 bool g_debugShowOutline = false;
@@ -181,7 +205,8 @@ POINT g_cursorVisualOffset = { 0, 0 };  // added to hotspot to reach visible-pix
 // All samples in a trail share the same coordinate space, even if the cursor
 // shape changes mid-trail (e.g. arrow → I-beam). g_cursorVisualOffset is
 // updated by the render thread; g_frozenCursorOffset is read and written by
-// the poll thread.
+// the poll thread. Unused when g_trailOriginMode is Immediate or Smooth
+// (Simple line), in which case each sample follows the live visual offset.
 POINT g_frozenCursorOffset = { 0, 0 };
 
 std::mutex g_offsetMutex;  // protects g_cursorCenterOffset, g_cursorVisualOffset and g_frozenCursorOffset
@@ -276,6 +301,19 @@ void LoadSettings() {
     g_antialiasing = !aaSetting || wcscmp(aaSetting, L"false") != 0;
     if (aaSetting) Wh_FreeStringSetting(aaSetting);
 
+    PCWSTR originChangeSetting = Wh_GetStringSetting(L"simpleLineOptions.trail_origin_on_cursor_change");
+    if (originChangeSetting && *originChangeSetting) {
+        g_trailOriginOnCursorChange = originChangeSetting;
+    } else {
+        g_trailOriginOnCursorChange = L"smooth";
+    }
+    if (originChangeSetting) Wh_FreeStringSetting(originChangeSetting);
+    if (g_trailOriginOnCursorChange != L"none" &&
+        g_trailOriginOnCursorChange != L"immediate" &&
+        g_trailOriginOnCursorChange != L"smooth") {
+        g_trailOriginOnCursorChange = L"smooth";
+    }
+
     g_tailDuration = Wh_GetIntSetting(L"simpleLineOptions.timeBased.tail_duration");
     g_tailSize = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.tail_size");
     g_sizeTimeout = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.timeout");
@@ -292,6 +330,18 @@ void LoadSettings() {
     // RG-3: unknown style value → fallback to simple_line
     if (g_activeStyle != L"simple_line" && g_activeStyle != L"cursor_ghost") {
         g_activeStyle = L"simple_line";
+    }
+
+    // Re-anchor the trail origin on cursor image changes only for the Simple
+    // line style; Cursor ghost keeps the frozen-origin behavior.
+    if (g_activeStyle != L"simple_line") {
+        g_trailOriginMode = ORIGIN_NONE;
+    } else if (g_trailOriginOnCursorChange == L"immediate") {
+        g_trailOriginMode = ORIGIN_IMMEDIATE;
+    } else if (g_trailOriginOnCursorChange == L"smooth") {
+        g_trailOriginMode = ORIGIN_SMOOTH;
+    } else {
+        g_trailOriginMode = ORIGIN_NONE;
     }
 
     if (g_tailDuration < 20) g_tailDuration = 20;
@@ -982,19 +1032,92 @@ DWORD WINAPI PollThreadProc(LPVOID) {
                     g_history.pop_back();
             }
 
-            // === TRAIL START — snapshot frozen offset when history is empty ===
-            // When a new trail starts, snapshot g_cursorVisualOffset so all
-            // samples in this trail share the same coordinate space even if the
-            // cursor shape changes mid-trail.
-            if (g_history.empty()) {
+            // === TRAIL ORIGIN — choose the offset for this sample ===
+            // Immediate/Smooth (Simple line only) follow the current cursor's
+            // visual center so the trail head lands correctly after a cursor
+            // image change (arrow → I-beam). None snapshots the offset when a
+            // new trail starts so all samples share one coordinate space.
+            POINT originOffset;
+            if (g_trailOriginMode != ORIGIN_SMOOTH) {
+                // Reset smooth-transition state so re-entering smooth mode
+                // snaps cleanly instead of accumulating a stale cursor jump.
+                g_originInitialized = false;
+                g_lastOriginCursorValid = false;
+            }
+            if (g_trailOriginMode == ORIGIN_IMMEDIATE) {
                 std::lock_guard<std::mutex> offsetLock(g_offsetMutex);
-                g_frozenCursorOffset = g_cursorVisualOffset;
+                originOffset = g_cursorVisualOffset;
+            } else if (g_trailOriginMode == ORIGIN_SMOOTH) {
+                POINT target;
+                {
+                    std::lock_guard<std::mutex> offsetLock(g_offsetMutex);
+                    target = g_cursorVisualOffset;
+                }
+
+                // Accumulate raw cursor travel (screen px) for size_based.
+                float dist = 0.0f;
+                if (g_lastOriginCursorValid) {
+                    float ddx = (float)(pt.x - g_lastOriginCursorPos.x);
+                    float ddy = (float)(pt.y - g_lastOriginCursorPos.y);
+                    dist = sqrtf(ddx * ddx + ddy * ddy);
+                }
+                g_lastOriginCursorPos = pt;
+                g_lastOriginCursorValid = true;
+
+                if (!g_originInitialized) {
+                    // Snap to the current offset on first use (no glide from 0,0).
+                    g_smoothedOffsetX = (float)target.x;
+                    g_smoothedOffsetY = (float)target.y;
+                    g_originTarget = target;
+                    g_originInitialized = true;
+                } else if (!g_originTransitioning &&
+                           (target.x != g_originTarget.x || target.y != g_originTarget.y)) {
+                    // Target changed — start an ease-in-out transition from the
+                    // current smoothed value.
+                    g_originFromX = g_smoothedOffsetX;
+                    g_originFromY = g_smoothedOffsetY;
+                    g_originTarget = target;
+                    g_originStartTime = now;
+                    g_originProgressDist = 0.0f;
+                    g_originTransitioning = true;
+                }
+
+                // Advance progress: time-driven (time_based) or distance-driven
+                // (size_based), over a third of the configured tail value.
+                if (g_originTransitioning) {
+                    float p;
+                    if (g_trailMode == L"size_based") {
+                        g_originProgressDist += dist;
+                        float len = (float)(g_tailSize / 3);
+                        if (len < 1.0f) len = 1.0f;
+                        p = g_originProgressDist / len;
+                    } else {
+                        float len = (float)(g_tailDuration / 3);
+                        if (len < 1.0f) len = 1.0f;
+                        p = (float)(now - g_originStartTime) / len;
+                    }
+                    if (p > 1.0f) p = 1.0f;
+                    float e = p * p * (3.0f - 2.0f * p);
+                    g_smoothedOffsetX = g_originFromX + (g_originTarget.x - g_originFromX) * e;
+                    g_smoothedOffsetY = g_originFromY + (g_originTarget.y - g_originFromY) * e;
+                    if (p >= 1.0f) g_originTransitioning = false;
+                } else {
+                    g_smoothedOffsetX = (float)target.x;
+                    g_smoothedOffsetY = (float)target.y;
+                }
+
+                originOffset.x = (LONG)(g_smoothedOffsetX + (g_smoothedOffsetX >= 0 ? 0.5f : -0.5f));
+                originOffset.y = (LONG)(g_smoothedOffsetY + (g_smoothedOffsetY >= 0 ? 0.5f : -0.5f));
+            } else {
+                std::lock_guard<std::mutex> offsetLock(g_offsetMutex);
+                if (g_history.empty()) {
+                    g_frozenCursorOffset = g_cursorVisualOffset;
+                }
+                originOffset = g_frozenCursorOffset;
             }
 
-            // Compute sample position with the frozen offset (inside the lock so
-            // it sees the freshly updated g_frozenCursorOffset if trail just started).
-            POINT newPt = { pt.x + g_frozenCursorOffset.x - vX,
-                            pt.y + g_frozenCursorOffset.y - vY };
+            POINT newPt = { pt.x + originOffset.x - vX,
+                            pt.y + originOffset.y - vY };
 
             // === DUPLICATE-SKIP — only blocks push, not eviction ===
             // Eviction has already run above, so it is safe to continue here.
@@ -1061,10 +1184,10 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
         }
     } else {
         // No game running — update cursor appearance caches. The poll thread
-        // owns trail-start (snapshots g_frozenCursorOffset when g_history is
-        // empty) and sample accumulation. Time-based eviction retracts the
-        // trail naturally when the cursor stops. The render thread only draws
-        // what's in g_history.
+        // owns trail-origin selection (frozen when g_history is empty, unless
+        // g_trailOriginMode is Immediate/Smooth) and sample accumulation.
+        // Time-based eviction retracts the trail naturally when the cursor
+        // stops. The render thread only draws what's in g_history.
         UpdateCursorCenterOffset();
         UpdateCursorBitmap();
     }
@@ -1163,15 +1286,17 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
                 std::lock_guard<std::mutex> lock(g_historyMutex);
                 if (g_history.empty()) {
                     // No history yet — fall back to the render thread's cursor position.
-                    // Read g_frozenCursorOffset under g_offsetMutex (nested inside
+                    // Read the origin offset under g_offsetMutex (nested inside
                     // g_historyMutex — consistent lock order everywhere).
-                    POINT frozenOffset;
+                    POINT originOffset;
                     {
                         std::lock_guard<std::mutex> offsetLock(g_offsetMutex);
-                        frozenOffset = g_frozenCursorOffset;
+                        originOffset = (g_trailOriginMode == ORIGIN_NONE)
+                            ? g_frozenCursorOffset
+                            : g_cursorVisualOffset;
                     }
-                    POINT headPt = { pt.x + frozenOffset.x - vX,
-                                     pt.y + frozenOffset.y - vY };
+                    POINT headPt = { pt.x + originOffset.x - vX,
+                                     pt.y + originOffset.y - vY };
                     smoothed.push_back(D2D1::Point2F(
                         (float)headPt.x + g_tailOffsetX,
                         (float)headPt.y + g_tailOffsetY));

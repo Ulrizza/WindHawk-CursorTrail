@@ -21,6 +21,7 @@ A [Windhawk](https://windhawk.net) mod that renders a customizable cursor trail 
 | `style` | Rendering style: `simple_line` or `cursor_ghost` |
 | `simpleLineOptions.trail_mode` | `time_based` (default) or `size_based` — how the trail expires |
 | `simpleLineOptions.antialiasing` | `True` (default) or `False` — smooth trail edges or hard, pixelated edges |
+| `simpleLineOptions.trail_origin_on_cursor_change` | Behavior when the cursor image changes: `smooth` (default) glides to the new cursor center with an ease-in-out transition; `none` keeps the origin frozen; `immediate` snaps |
 | `simpleLineOptions.timeBased.tail_duration` | Milliseconds each trail segment stays visible (min 20) |
 | `simpleLineOptions.sizeBased.tail_size` | Total trail length in pixels — eviction walks from head and drops points past this distance (min 20) |
 | `simpleLineOptions.sizeBased.timeout` | Milliseconds of inactivity before trail fades using Time based duration (0 = disabled) |
