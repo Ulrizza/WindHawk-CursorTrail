@@ -50,7 +50,7 @@
     - tail_size: 2000
       $name: Tail length
       $description: Maximum trail length in pixels (minimum 20)
-    - timeout: 0
+    - timeout: 2000
       $name: Timeout
       $description: Milliseconds of inactivity before the trail starts fading (using the Time based tail duration). 0 = trail always visible.
     $name: Size based
@@ -60,10 +60,10 @@
       $description: "Comma-separated stroke widths from head to tail (e.g. \"2,1\" for a tapered trail, or \"10,1,10,1\" for a pulsing trail). Each value gets an equal share; repeat to widen (e.g. \"2,2,2,2,1\" = 80%% at 2, 20%% at 1). Minimum 1."
     $name: Width
   - color:
-    - values: "000000"
+    - values: "FF0000,FF7F00,FFFF00,7FFF00,00FF00,00FFFF,0000FF,4B0082,8B00FF"
       $name: Values
       $description: "Line color for the Simple line style. Single hex (RRGGBB without #, e.g. 000000 for black) or comma-separated list for a gradient from head to tail (e.g. 000000,FF0000,FFFFFF for black->red->white). Each color gets an equal share; repeat to widen. Invalid entries are skipped."
-    - blend_width: 0
+    - blend_width: 100
       $name: Blend width
       $description: Percentage of each transition spent blending (0 = pure bands, 100 = full gradient). 50 with red,blue gives 25% hard red, 50% blend, 25% hard blue.
     - interpolation: "smoothstep"
@@ -76,7 +76,7 @@
       - ease_out: Ease out
     $name: Color
   - opacity:
-    - values: "100,0"
+    - values: "100,80"
       $name: Values
       $description: Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade, or "100,0,100" for a pulse). Each value gets an equal share; repeat to widen. Leave one value for uniform opacity.
     $name: Opacity
