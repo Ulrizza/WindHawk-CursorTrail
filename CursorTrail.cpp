@@ -117,130 +117,112 @@ struct Sample {
 };
 
 // Global state variables
-HWND g_overlayHwnd = NULL;
-HANDLE g_threadHandle = NULL;
-DWORD g_overlayThreadId = 0;
-std::deque<Sample> g_history;
-std::mutex g_historyMutex;          // protects g_history (accessed by poll + render threads)
-HANDLE g_pollThread = NULL;
-HANDLE g_pollStopEvent = NULL;
-std::atomic<bool> g_isGameRunning(false); // set by render thread, read by poll thread
-std::atomic<bool> g_cursorHidden(false);  // set by render thread, read by poll thread
-std::atomic<bool> g_renderScheduled(false); // set by MMTimerCallback, cleared by the overlay thread
-int g_sampleRate = 1;               // polling interval in ms
-// Direct2D globals
-ID2D1Factory* g_pD2DFactory = nullptr;
-ID2D1DCRenderTarget* g_pDCRenderTarget = nullptr;
-
-// Cached backbuffer so we stop nuking the RAM every frame
-HDC g_hdcMem = NULL;
-HBITMAP g_hBitmap = NULL;
-int g_cachedVW = 0;
-int g_cachedVH = 0;
-
-// Settings cache
-int g_tailOffsetX = 0;
-int g_tailOffsetY = 0;
-int g_tailDuration = 1000;
-bool g_sizeBased = false;                               // trail mode: size_based vs time_based
-std::wstring g_trailOriginOnCursorChange = L"smooth";  // raw setting
 
 // How the trail origin reacts to cursor image changes (Simple line only).
 enum TrailOriginMode { ORIGIN_NONE, ORIGIN_IMMEDIATE, ORIGIN_SMOOTH };
-TrailOriginMode g_trailOriginMode = ORIGIN_SMOOTH;
 
 // Easing curves used for color blending and interpolation.
 enum ColorInterpolation { INTERP_LINEAR, INTERP_SMOOTHSTEP, INTERP_EASE_IN, INTERP_EASE_OUT };
 
-// Ease-in-out origin transition state (poll-thread owned).
-float g_originFromX = 0.0f, g_originFromY = 0.0f;  // value at transition start
-POINT g_originTarget = { 0, 0 };                    // current target offset
-float g_smoothedOffsetX = 0.0f, g_smoothedOffsetY = 0.0f;
-DWORD g_originStartTime = 0;                        // time_based transition start
-float g_originProgressDist = 0.0f;                  // size_based distance travelled
-bool g_originTransitioning = false;
-bool g_originInitialized = false;
-POINT g_lastOriginCursorPos = { 0, 0 };             // for distance accumulation
-bool g_lastOriginCursorValid = false;
-
-int g_tailSize = 2000;
-bool g_antialiasing = true;
-bool g_debugShowOutline = false;
-
-DWORD g_sizeTimeout = 0;
-DWORD g_lastMovementTime = 0;
-bool g_isFading = false;
-
-// Active rendering style (copied from Wh_GetStringSetting, freed immediately)
-std::wstring g_activeStyle = L"simple_line";
-
-// Simple line style settings
-std::vector<float> g_simpleLineWidths;       // parsed width values, one per stop
-
 struct Rgb { float r, g, b; };
-std::vector<Rgb> g_simpleLineColorsRGB;         // pre-parsed for hot-path use
 
-int g_colorBlendWidth = 0;
-ColorInterpolation g_colorInterp = INTERP_SMOOTHSTEP;
-// Precomputed pure-band boundaries for GetBlendedColor (aligned with
-// g_simpleLineColorsRGB). Built in LoadSettings.
-float g_colorBlendHalf = 0.0f;
-std::vector<float> g_colorBandStart;
-std::vector<float> g_colorBandEnd;
+// Parsed settings, written by LoadSettings and read by all threads.
+struct Settings {
+    int   tailOffsetX = 0, tailOffsetY = 0;
+    int   tailDuration = 1000;
+    bool  sizeBased = false;                          // trail mode: size_based vs time_based
+    int   tailSize = 2000;
+    DWORD sizeTimeout = 0;
+    bool  antialiasing = true;
+    bool  debugShowOutline = false;
 
-std::vector<float> g_simpleLineOpacityValues; // parsed opacity alphas (0.0-1.0)
+    std::wstring    activeStyle = L"simple_line";
+    std::wstring    trailOriginOnCursorChange = L"smooth";
+    TrailOriginMode trailOriginMode = ORIGIN_SMOOTH;
 
-ID2D1SolidColorBrush* g_pSimpleLineBrush = nullptr;
-ID2D1StrokeStyle* g_pStrokeStyle = nullptr;
+    std::vector<float> simpleLineWidths;              // parsed width values, one per stop
+    std::vector<Rgb>   simpleLineColorsRGB;           // pre-parsed for hot-path use
+    int   colorBlendWidth = 0;
+    ColorInterpolation colorInterp = INTERP_SMOOTHSTEP;
+    float colorBlendHalf = 0.0f;
+    std::vector<float> colorBandStart;                // precomputed pure-band boundaries
+    std::vector<float> colorBandEnd;
+    std::vector<float> simpleLineOpacityValues;       // parsed opacity alphas (0.0-1.0)
+};
 
-// DEBUG: white 1px box around the detected cursor bitmap (temporary).
-ID2D1SolidColorBrush* g_pDebugBrush = nullptr;
-// DEBUG: red 1px box around the alpha-trimmed (visible) cursor pixels (temporary).
-ID2D1SolidColorBrush* g_pDebugBrushRed = nullptr;
-// DEBUG: blue "+" marking the exact trail start point (temporary).
-ID2D1SolidColorBrush* g_pDebugBrushBlue = nullptr;
+// Cursor geometry cache. The center/visual/frozen offsets are shared with the
+// poll thread via offsetMutex; the debug dimensions below are render-thread-only.
+struct CursorState {
+    HCURSOR cachedCursor = NULL;
+    POINT   centerOffset = { 0, 0 };  // hotspot → bitmap center (anchors debug boxes)
+    POINT   visualOffset = { 0, 0 };  // hotspot → visible-pixel center (trail origin)
+    POINT   frozenCursorOffset = { 0, 0 };  // snapshot of the trail origin at trail start
+    std::mutex offsetMutex;                 // protects center/visual/frozen offsets (read by poll thread)
 
-// Cursor visual-center cache (avoids re-querying GetIconInfo every frame
-// when the cursor handle hasn't changed)
-HCURSOR g_cachedCursor = NULL;
-POINT g_cursorCenterOffset = { 0, 0 };  // added to hotspot to reach bitmap center (anchors debug boxes)
-POINT g_cursorVisualOffset = { 0, 0 };  // added to hotspot to reach visible-pixel center (trail origin)
+    int   bmWidth = 0, bmHeight = 0;        // bitmap dims + DPI scale for the debug boxes
+    float dpiScaleX = 1.0f, dpiScaleY = 1.0f;
+    bool  visibleValid = false;             // visible (alpha-trimmed) bounds
+    int   visLeft = 0, visTop = 0, visRight = 0, visBottom = 0;
+};
 
-// Frozen trail-origin offset, snapshotted by the poll thread when a new
-// trail starts (g_history is empty and a new sample is about to be pushed).
-// All samples in a trail share the same coordinate space, even if the cursor
-// shape changes mid-trail (e.g. arrow → I-beam). g_cursorVisualOffset is
-// updated by the render thread; g_frozenCursorOffset is read and written by
-// the poll thread. Unused when g_trailOriginMode is Immediate or Smooth
-// (Simple line), in which case each sample follows the live visual offset.
-POINT g_frozenCursorOffset = { 0, 0 };
+// Ease-in-out origin transition state (poll-thread-owned).
+struct OriginTransition {
+    float fromX = 0.0f, fromY = 0.0f;       // value at transition start
+    POINT target = { 0, 0 };                // current target offset
+    float smoothedOffsetX = 0.0f, smoothedOffsetY = 0.0f;
+    DWORD startTime = 0;                    // time_based transition start
+    float progressDist = 0.0f;              // size_based distance travelled
+    bool  transitioning = false;
+    bool  initialized = false;
+    POINT lastCursorPos = { 0, 0 };         // for distance accumulation
+    bool  lastCursorValid = false;
+};
 
-std::mutex g_offsetMutex;  // protects g_cursorCenterOffset, g_cursorVisualOffset and g_frozenCursorOffset
-                            // (read by the poll thread). Does NOT protect the debug-dimension
-                            // globals below — those are render-thread-only.
-                            // lock order: g_historyMutex (if needed) THEN g_offsetMutex
+// Direct2D + backbuffer resources.
+struct RenderResources {
+    ID2D1Factory*         pD2DFactory = nullptr;
+    ID2D1DCRenderTarget*  pDCRenderTarget = nullptr;
+    ID2D1SolidColorBrush* pSimpleLineBrush = nullptr;
+    ID2D1StrokeStyle*     pStrokeStyle = nullptr;
+    // DEBUG brushes (temporary): white = bitmap bounds, red = visible pixels, blue = trail start.
+    ID2D1SolidColorBrush* pDebugBrush = nullptr;
+    ID2D1SolidColorBrush* pDebugBrushRed = nullptr;
+    ID2D1SolidColorBrush* pDebugBrushBlue = nullptr;
 
+    HDC     hdcMem = NULL;                  // cached backbuffer
+    HBITMAP hBitmap = NULL;
+    int     cachedVW = 0, cachedVH = 0;
+};
 
-// Cursor bitmap dimensions and DPI scale, cached per-HCURSOR by
-// UpdateCursorCenterOffset. Used by the debug outline boxes.
-// Render-thread-only: written by UpdateCursorCenterOffset and read by
-// SmearTimerProc, both on the overlay/render thread (no lock required).
-int g_cursorBmWidth = 0;
-int g_cursorBmHeight = 0;
-float g_cursorDpiScaleX = 1.0f;
-float g_cursorDpiScaleY = 1.0f;
+// Runtime state: threads, window, history, atomics, timer, and frame state.
+struct Runtime {
+    HWND   overlayHwnd = NULL;
+    HANDLE threadHandle = NULL;
+    DWORD  overlayThreadId = 0;
+    std::deque<Sample> history;
+    std::mutex historyMutex;                  // protects history (poll + render threads)
+    HANDLE pollThread = NULL;
+    HANDLE pollStopEvent = NULL;
+    std::atomic<bool> isGameRunning{false};   // set by render thread, read by poll thread
+    std::atomic<bool> cursorHidden{false};    // set by render thread, read by poll thread
+    std::atomic<bool> renderScheduled{false}; // set by MMTimerCallback, cleared by overlay thread
+    int     sampleRate = 1;                   // polling interval in ms
+    MMRESULT mmTimerId = 0;
 
-// DEBUG: visible (alpha-trimmed) bounds of the cursor bitmap, in bitmap coords
-// (right/bottom exclusive). Temporary, used for the red debug box.
-// Render-thread-only (same ownership as the dimensions above).
-bool g_cursorVisibleValid = false;
-int g_cursorVisLeft = 0, g_cursorVisTop = 0, g_cursorVisRight = 0, g_cursorVisBottom = 0;
+    DWORD lastMovementTime = 0;               // poll-thread-owned
+    bool  isFading = false;
 
-// Multimedia timer handle for the render loop. Replaces SetTimer/WM_TIMER
-// for smoother, non-coalesced wakeups. The timer callback runs on a system
-// thread and just PostMessages the overlay window — all rendering stays on
-// the overlay thread.
-MMRESULT g_mmTimerId = 0;
+    RECT  prevDirtyRect = { 0, 0, 0, 0 };     // render-thread-only frame state
+    bool  hasPrevDirty = false;
+    bool  needsClear = false;
+    DWORD lastFullscreenCheck = 0;
+};
+
+Settings         settings;
+CursorState      cursor;
+OriginTransition origin;
+RenderResources  render;
+Runtime          runtime;
 
 static std::vector<std::wstring> SplitAndTrim(const std::wstring& input) {
     std::vector<std::wstring> result;
@@ -323,56 +305,56 @@ static void ParseFloatList(const wchar_t* key, const std::wstring& defaultToken,
 }
 
 void LoadSettings() {
-    g_tailOffsetX = Wh_GetIntSetting(L"tail_offset.x");
-    g_tailOffsetY = Wh_GetIntSetting(L"tail_offset.y");
+    settings.tailOffsetX = Wh_GetIntSetting(L"tail_offset.x");
+    settings.tailOffsetY = Wh_GetIntSetting(L"tail_offset.y");
 
-    g_debugShowOutline = Wh_GetIntSetting(L"debug.show_outline") != 0;
+    settings.debugShowOutline = Wh_GetIntSetting(L"debug.show_outline") != 0;
 
     // Trail mode
-    g_sizeBased = ReadStringSetting(L"simpleLineOptions.trail_mode", L"time_based") == L"size_based";
+    settings.sizeBased = ReadStringSetting(L"simpleLineOptions.trail_mode", L"time_based") == L"size_based";
 
-    g_antialiasing = ReadStringSetting(L"simpleLineOptions.antialiasing", L"true") != L"false";
+    settings.antialiasing = ReadStringSetting(L"simpleLineOptions.antialiasing", L"true") != L"false";
 
-    g_trailOriginOnCursorChange = ReadStringSetting(L"simpleLineOptions.trail_origin_on_cursor_change", L"smooth");
-    if (g_trailOriginOnCursorChange != L"none" &&
-        g_trailOriginOnCursorChange != L"immediate" &&
-        g_trailOriginOnCursorChange != L"smooth") {
-        g_trailOriginOnCursorChange = L"smooth";
+    settings.trailOriginOnCursorChange = ReadStringSetting(L"simpleLineOptions.trail_origin_on_cursor_change", L"smooth");
+    if (settings.trailOriginOnCursorChange != L"none" &&
+        settings.trailOriginOnCursorChange != L"immediate" &&
+        settings.trailOriginOnCursorChange != L"smooth") {
+        settings.trailOriginOnCursorChange = L"smooth";
     }
 
-    g_tailDuration = Wh_GetIntSetting(L"simpleLineOptions.timeBased.tail_duration");
-    g_tailSize = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.tail_size");
-    g_sizeTimeout = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.timeout");
+    settings.tailDuration = Wh_GetIntSetting(L"simpleLineOptions.timeBased.tail_duration");
+    settings.tailSize = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.tail_size");
+    settings.sizeTimeout = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.timeout");
 
-    g_activeStyle = ReadStringSetting(L"style", L"simple_line");
+    settings.activeStyle = ReadStringSetting(L"style", L"simple_line");
 
     // RG-3: unknown style value → fallback to simple_line
-    if (g_activeStyle != L"simple_line" && g_activeStyle != L"cursor_ghost") {
-        g_activeStyle = L"simple_line";
+    if (settings.activeStyle != L"simple_line" && settings.activeStyle != L"cursor_ghost") {
+        settings.activeStyle = L"simple_line";
     }
 
     // Re-anchor the trail origin on cursor image changes.
-    if (g_trailOriginOnCursorChange == L"immediate") {
-        g_trailOriginMode = ORIGIN_IMMEDIATE;
-    } else if (g_trailOriginOnCursorChange == L"smooth") {
-        g_trailOriginMode = ORIGIN_SMOOTH;
+    if (settings.trailOriginOnCursorChange == L"immediate") {
+        settings.trailOriginMode = ORIGIN_IMMEDIATE;
+    } else if (settings.trailOriginOnCursorChange == L"smooth") {
+        settings.trailOriginMode = ORIGIN_SMOOTH;
     } else {
-        g_trailOriginMode = ORIGIN_NONE;
+        settings.trailOriginMode = ORIGIN_NONE;
     }
 
-    if (g_tailDuration < 20) g_tailDuration = 20;
-    if (g_tailSize < 20) g_tailSize = 20;
-    if (g_sizeTimeout < 0) g_sizeTimeout = 0;
+    if (settings.tailDuration < 20) settings.tailDuration = 20;
+    if (settings.tailSize < 20) settings.tailSize = 20;
+    if (settings.sizeTimeout < 0) settings.sizeTimeout = 0;
 
     // Parse width values (min 1, no upper clamp)
-    ParseFloatList(L"simpleLineOptions.width.values", L"1", 1.0f, 1e30f, 1.0f, g_simpleLineWidths);
+    ParseFloatList(L"simpleLineOptions.width.values", L"1", 1.0f, 1e30f, 1.0f, settings.simpleLineWidths);
 
     // Parse opacity values (percentages 0-100), then convert to 0-1 alphas.
-    ParseFloatList(L"simpleLineOptions.opacity.values", L"100", 0.0f, 100.0f, 100.0f, g_simpleLineOpacityValues);
-    for (float& v : g_simpleLineOpacityValues) v /= 100.0f;
+    ParseFloatList(L"simpleLineOptions.opacity.values", L"100", 0.0f, 100.0f, 100.0f, settings.simpleLineOpacityValues);
+    for (float& v : settings.simpleLineOpacityValues) v /= 100.0f;
 
     // Parse color values
-    g_simpleLineColorsRGB.clear();
+    settings.simpleLineColorsRGB.clear();
     {
         std::wstring colorSetting = ReadStringSetting(L"simpleLineOptions.color.values", L"000000");
         std::vector<std::wstring> colorTokens = SplitAndTrim(colorSetting);
@@ -384,33 +366,33 @@ void LoadSettings() {
             if (!ParseHexColor(hex, rgb.r, rgb.g, rgb.b)) {
                 rgb = { 0, 0, 0 };
             }
-            g_simpleLineColorsRGB.push_back(rgb);
+            settings.simpleLineColorsRGB.push_back(rgb);
         }
     }
 
-    g_colorBlendWidth = Wh_GetIntSetting(L"simpleLineOptions.color.blend_width");
-    if (g_colorBlendWidth < 0) g_colorBlendWidth = 0;
-    if (g_colorBlendWidth > 100) g_colorBlendWidth = 100;
+    settings.colorBlendWidth = Wh_GetIntSetting(L"simpleLineOptions.color.blend_width");
+    if (settings.colorBlendWidth < 0) settings.colorBlendWidth = 0;
+    if (settings.colorBlendWidth > 100) settings.colorBlendWidth = 100;
 
     std::wstring interp = ReadStringSetting(L"simpleLineOptions.color.interpolation", L"smoothstep");
-    if (interp == L"ease_in")      g_colorInterp = INTERP_EASE_IN;
-    else if (interp == L"ease_out") g_colorInterp = INTERP_EASE_OUT;
-    else if (interp == L"smoothstep") g_colorInterp = INTERP_SMOOTHSTEP;
-    else                            g_colorInterp = INTERP_LINEAR;
+    if (interp == L"ease_in")      settings.colorInterp = INTERP_EASE_IN;
+    else if (interp == L"ease_out") settings.colorInterp = INTERP_EASE_OUT;
+    else if (interp == L"smoothstep") settings.colorInterp = INTERP_SMOOTHSTEP;
+    else                            settings.colorInterp = INTERP_LINEAR;
 
     // Precompute pure-band boundaries for GetBlendedColor.
-    g_colorBlendHalf = (g_colorBlendWidth / 100.0f) / 2.0f;
-    g_colorBandStart.clear();
-    g_colorBandEnd.clear();
+    settings.colorBlendHalf = (settings.colorBlendWidth / 100.0f) / 2.0f;
+    settings.colorBandStart.clear();
+    settings.colorBandEnd.clear();
     {
-        size_t N = g_simpleLineColorsRGB.size();
-        g_colorBandStart.reserve(N);
-        g_colorBandEnd.reserve(N);
+        size_t N = settings.simpleLineColorsRGB.size();
+        settings.colorBandStart.reserve(N);
+        settings.colorBandEnd.reserve(N);
         for (size_t i = 0; i < N; ++i) {
-            float start = (i == 0) ? 0.0f : (float)i / (float)N + g_colorBlendHalf;
-            float end = (i == N - 1) ? 1.0f : (float)(i + 1) / (float)N - g_colorBlendHalf;
-            g_colorBandStart.push_back(start);
-            g_colorBandEnd.push_back(end);
+            float start = (i == 0) ? 0.0f : (float)i / (float)N + settings.colorBlendHalf;
+            float end = (i == N - 1) ? 1.0f : (float)(i + 1) / (float)N - settings.colorBlendHalf;
+            settings.colorBandStart.push_back(start);
+            settings.colorBandEnd.push_back(end);
         }
     }
 }
@@ -539,33 +521,33 @@ static void ComputeVisibleBounds(HBITMAP hbm, int& left, int& top, int& right, i
 // the trail origin. Cached per-HCURSOR so we only do the work when the cursor
 // shape actually changes.
 void UpdateCursorCenterOffset() {
-    std::lock_guard<std::mutex> lock(g_offsetMutex);
+    std::lock_guard<std::mutex> lock(cursor.offsetMutex);
 
     CURSORINFO ci = { sizeof(CURSORINFO) };
     if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
-        g_cursorHidden.store(true);
-        g_cursorCenterOffset = { 0, 0 };
-        g_cursorVisualOffset = { 0, 0 };
-        g_cursorVisibleValid = false;
-        g_cursorBmWidth = 0;
-        g_cursorBmHeight = 0;
-        g_cachedCursor = NULL;
+        runtime.cursorHidden.store(true);
+        cursor.centerOffset = { 0, 0 };
+        cursor.visualOffset = { 0, 0 };
+        cursor.visibleValid = false;
+        cursor.bmWidth = 0;
+        cursor.bmHeight = 0;
+        cursor.cachedCursor = NULL;
         return;
     }
-    g_cursorHidden.store(false);
+    runtime.cursorHidden.store(false);
 
-    if (ci.hCursor == g_cachedCursor) {
+    if (ci.hCursor == cursor.cachedCursor) {
         return;  // same cursor as last frame, reuse cached offset
     }
 
     ICONINFO ii = { };
     if (!GetIconInfo(ci.hCursor, &ii)) {
-        g_cursorCenterOffset = { 0, 0 };
-        g_cursorVisualOffset = { 0, 0 };
-        g_cursorVisibleValid = false;
-        g_cursorBmWidth = 0;
-        g_cursorBmHeight = 0;
-        g_cachedCursor = NULL;
+        cursor.centerOffset = { 0, 0 };
+        cursor.visualOffset = { 0, 0 };
+        cursor.visibleValid = false;
+        cursor.bmWidth = 0;
+        cursor.bmHeight = 0;
+        cursor.cachedCursor = NULL;
         return;
     }
 
@@ -580,37 +562,37 @@ void UpdateCursorCenterOffset() {
         float sy = (float)actualY / (float)bmHeight;
 
         // Cache the bitmap dimensions and DPI scale for the debug outline boxes.
-        g_cursorBmWidth = bmWidth;
-        g_cursorBmHeight = bmHeight;
-        g_cursorDpiScaleX = sx;
-        g_cursorDpiScaleY = sy;
+        cursor.bmWidth = bmWidth;
+        cursor.bmHeight = bmHeight;
+        cursor.dpiScaleX = sx;
+        cursor.dpiScaleY = sy;
 
         // Bitmap center (anchors the debug outline boxes).
-        g_cursorCenterOffset.x = (int)(((bmWidth / 2.0f) - (int)ii.xHotspot) * sx + 0.5f);
-        g_cursorCenterOffset.y = (int)(((bmHeight / 2.0f) - (int)ii.yHotspot) * sy + 0.5f);
+        cursor.centerOffset.x = (int)(((bmWidth / 2.0f) - (int)ii.xHotspot) * sx + 0.5f);
+        cursor.centerOffset.y = (int)(((bmHeight / 2.0f) - (int)ii.yHotspot) * sy + 0.5f);
 
         // Visible-pixel center (trail origin). Falls back to the bitmap center.
-        ComputeVisibleBounds(hbmToUse, g_cursorVisLeft, g_cursorVisTop,
-                             g_cursorVisRight, g_cursorVisBottom, g_cursorVisibleValid);
+        ComputeVisibleBounds(hbmToUse, cursor.visLeft, cursor.visTop,
+                             cursor.visRight, cursor.visBottom, cursor.visibleValid);
         float visCx = bmWidth / 2.0f;
         float visCy = bmHeight / 2.0f;
-        if (g_cursorVisibleValid) {
-            visCx = (g_cursorVisLeft + g_cursorVisRight) / 2.0f;
-            visCy = (g_cursorVisTop + g_cursorVisBottom) / 2.0f;
+        if (cursor.visibleValid) {
+            visCx = (cursor.visLeft + cursor.visRight) / 2.0f;
+            visCy = (cursor.visTop + cursor.visBottom) / 2.0f;
         }
-        g_cursorVisualOffset.x = (int)((visCx - (int)ii.xHotspot) * sx + 0.5f);
-        g_cursorVisualOffset.y = (int)((visCy - (int)ii.yHotspot) * sy + 0.5f);
+        cursor.visualOffset.x = (int)((visCx - (int)ii.xHotspot) * sx + 0.5f);
+        cursor.visualOffset.y = (int)((visCy - (int)ii.yHotspot) * sy + 0.5f);
     } else {
-        g_cursorCenterOffset = { 0, 0 };
-        g_cursorVisualOffset = { 0, 0 };
-        g_cursorVisibleValid = false;
-        g_cursorBmWidth = 0;
-        g_cursorBmHeight = 0;
+        cursor.centerOffset = { 0, 0 };
+        cursor.visualOffset = { 0, 0 };
+        cursor.visibleValid = false;
+        cursor.bmWidth = 0;
+        cursor.bmHeight = 0;
     }
 
     FreeIconInfoBitmaps(ii);
 
-    g_cachedCursor = ci.hCursor;
+    cursor.cachedCursor = ci.hCursor;
 }
 
 bool IsGameRunning() {
@@ -685,7 +667,7 @@ static LONG RoundToLong(float v) {
 // zones overlap, merging into a multi-color gradient. Reads the precomputed
 // band boundaries from LoadSettings.
 static void GetBlendedColor(float ratio, float& r, float& g, float& b) {
-    const std::vector<Rgb>& colors = g_simpleLineColorsRGB;
+    const std::vector<Rgb>& colors = settings.simpleLineColorsRGB;
     r = 0.0f; g = 0.0f; b = 0.0f;
     if (colors.empty()) return;
     if (colors.size() == 1) {
@@ -694,12 +676,12 @@ static void GetBlendedColor(float ratio, float& r, float& g, float& b) {
     }
 
     int N = (int)colors.size();
-    float half = g_colorBlendHalf;
+    float half = settings.colorBlendHalf;
 
     // Check pure bands first
     for (int i = 0; i < N; ++i) {
-        if (g_colorBandEnd[i] > g_colorBandStart[i] &&
-            ratio >= g_colorBandStart[i] && ratio <= g_colorBandEnd[i]) {
+        if (settings.colorBandEnd[i] > settings.colorBandStart[i] &&
+            ratio >= settings.colorBandStart[i] && ratio <= settings.colorBandEnd[i]) {
             r = colors[i].r; g = colors[i].g; b = colors[i].b;
             return;
         }
@@ -734,7 +716,7 @@ static void GetBlendedColor(float ratio, float& r, float& g, float& b) {
     }
     float frac = (ratio - zoneStart) / span;
 
-    frac = Ease(frac, g_colorInterp);
+    frac = Ease(frac, settings.colorInterp);
 
     // Colors are evenly spaced within the blend region, so the index and
     // fraction are computed directly (no position array allocation).
@@ -772,7 +754,7 @@ static float InterpolateWidth(const std::vector<float>& values,
 }
 
 static float InterpolateOpacity(float ratio) {
-    float alpha = InterpolateWidth(g_simpleLineOpacityValues, ratio);
+    float alpha = InterpolateWidth(settings.simpleLineOpacityValues, ratio);
     if (alpha < 0.0f) alpha = 0.0f;
     if (alpha > 1.0f) alpha = 1.0f;
     return alpha;
@@ -786,59 +768,82 @@ static float InterpolateOpacity(float ratio) {
 // to transparent at the tail (smoothed.back()). Width, color and max opacity are user-configurable.
 void RenderSimpleLineStyle(const std::vector<D2D1_POINT_2F>& smoothed) {
     if (smoothed.size() < 2) return;
-    if (!g_pDCRenderTarget) return;
+    if (!render.pDCRenderTarget) return;
 
-    if (!g_pSimpleLineBrush) {
-        g_pDCRenderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 1.0f), &g_pSimpleLineBrush);
-        if (!g_pSimpleLineBrush) return;
+    if (!render.pSimpleLineBrush) {
+        render.pDCRenderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 1.0f), &render.pSimpleLineBrush);
+        if (!render.pSimpleLineBrush) return;
     }
-    if (!g_pStrokeStyle && g_pD2DFactory) {
+    if (!render.pStrokeStyle && render.pD2DFactory) {
         D2D1_STROKE_STYLE_PROPERTIES props = D2D1::StrokeStyleProperties(
             D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
             D2D1_LINE_JOIN_ROUND, 10.0f,
             D2D1_DASH_STYLE_SOLID, 0.0f);
-        g_pD2DFactory->CreateStrokeStyle(&props, nullptr, 0, &g_pStrokeStyle);
+        render.pD2DFactory->CreateStrokeStyle(&props, nullptr, 0, &render.pStrokeStyle);
     }
 
     size_t segCount = smoothed.size() - 1;
     for (size_t i = 0; i < segCount; ++i) {
         float ratio = (segCount > 1) ? (float)i / (float)(segCount - 1) : 0.0f;
         float alpha = InterpolateOpacity(ratio);
-        float strokeWidth = InterpolateWidth(g_simpleLineWidths, ratio);
+        float strokeWidth = InterpolateWidth(settings.simpleLineWidths, ratio);
         if (strokeWidth < 0.5f) strokeWidth = 0.5f;
 
         float gr, gg, gb;
         GetBlendedColor(ratio, gr, gg, gb);
 
-        g_pSimpleLineBrush->SetColor(D2D1::ColorF(gr * alpha, gg * alpha, gb * alpha, alpha));
-        g_pDCRenderTarget->DrawLine(smoothed[i], smoothed[i + 1], g_pSimpleLineBrush,
-                                    strokeWidth, g_pStrokeStyle);
+        render.pSimpleLineBrush->SetColor(D2D1::ColorF(gr * alpha, gg * alpha, gb * alpha, alpha));
+        render.pDCRenderTarget->DrawLine(smoothed[i], smoothed[i + 1], render.pSimpleLineBrush,
+                                    strokeWidth, render.pStrokeStyle);
     }
 }
 
-// Time-based eviction: drop samples older than g_tailDuration, then cap the
-// total count. Caller must hold g_historyMutex.
+// Releases the brushes and render target owned by the current render target.
+// render.pStrokeStyle is factory-owned, so it survives target recreation.
+static void ReleaseRenderTargetResources() {
+    if (render.pSimpleLineBrush) { render.pSimpleLineBrush->Release(); render.pSimpleLineBrush = nullptr; }
+    if (render.pDebugBrush) { render.pDebugBrush->Release(); render.pDebugBrush = nullptr; }
+    if (render.pDebugBrushRed) { render.pDebugBrushRed->Release(); render.pDebugBrushRed = nullptr; }
+    if (render.pDebugBrushBlue) { render.pDebugBrushBlue->Release(); render.pDebugBrushBlue = nullptr; }
+    if (render.pDCRenderTarget) { render.pDCRenderTarget->Release(); render.pDCRenderTarget = nullptr; }
+}
+
+// Expands a bounding box to include the given rect, or initializes it if unset.
+static void GrowBBox(RECT& bbox, bool& hasBBox, LONG l, LONG t, LONG r, LONG b) {
+    if (hasBBox) {
+        if (l < bbox.left) bbox.left = l;
+        if (t < bbox.top) bbox.top = t;
+        if (r > bbox.right) bbox.right = r;
+        if (b > bbox.bottom) bbox.bottom = b;
+    } else {
+        bbox.left = l; bbox.top = t; bbox.right = r; bbox.bottom = b;
+        hasBBox = true;
+    }
+}
+
+// Time-based eviction: drop samples older than settings.tailDuration, then cap the
+// total count. Caller must hold runtime.historyMutex.
 static void EvictByTime(DWORD now) {
-    while (!g_history.empty() && (now - g_history.back().t) > (DWORD)g_tailDuration)
-        g_history.pop_back();
-    const size_t kMaxSamples = (size_t)(g_tailDuration);
-    while (g_history.size() > kMaxSamples)
-        g_history.pop_back();
+    while (!runtime.history.empty() && (now - runtime.history.back().t) > (DWORD)settings.tailDuration)
+        runtime.history.pop_back();
+    const size_t kMaxSamples = (size_t)(settings.tailDuration);
+    while (runtime.history.size() > kMaxSamples)
+        runtime.history.pop_back();
 }
 
 // High-frequency cursor polling thread.
-// Runs at g_sampleRate ms intervals (default 1 ms), pushes sampled positions
-// into g_history when the trail is active. All D2D operations remain on the
-// overlay/render thread — this thread only touches g_history (under mutex),
+// Runs at runtime.sampleRate ms intervals (default 1 ms), pushes sampled positions
+// into runtime.history when the trail is active. All D2D operations remain on the
+// overlay/render thread — this thread only touches runtime.history (under mutex),
 // GetCursorPos, and the atomic flags.
 DWORD WINAPI PollThreadProc(LPVOID) {
     // Match the overlay thread's DPI awareness so coordinate spaces agree.
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    // Wait on the stop event with a g_sampleRate ms timeout to drive the loop.
-    while (WaitForSingleObject(g_pollStopEvent, g_sampleRate) == WAIT_TIMEOUT) {
+    // Wait on the stop event with a runtime.sampleRate ms timeout to drive the loop.
+    while (WaitForSingleObject(runtime.pollStopEvent, runtime.sampleRate) == WAIT_TIMEOUT) {
         // Respect the game-running flag set by SmearTimerProc.
-        if (g_isGameRunning.load()) continue;
+        if (runtime.isGameRunning.load()) continue;
 
         POINT pt;
         if (!GetCursorPos(&pt)) continue;
@@ -848,43 +853,43 @@ DWORD WINAPI PollThreadProc(LPVOID) {
         int vY = GetSystemMetrics(SM_YVIRTUALSCREEN);
 
         {
-            std::lock_guard<std::mutex> lock(g_historyMutex);
+            std::lock_guard<std::mutex> lock(runtime.historyMutex);
 
             // === EVICTION — runs every tick, regardless of cursor movement ===
             // Must happen before the duplicate-skip so that old samples expire
             // even when the cursor is stationary (duplicate-skip would otherwise
             // continue before reaching eviction, freezing the trail).
             DWORD now = timeGetTime();
-            if (g_sizeBased) {
-                if ((g_sizeTimeout > 0 && g_lastMovementTime > 0 &&
-                     now - g_lastMovementTime > g_sizeTimeout) ||
-                    g_cursorHidden.load()) {
-                    if (!g_isFading) {
-                        g_isFading = true;
-                        size_t n = g_history.size();
+            if (settings.sizeBased) {
+                if ((settings.sizeTimeout > 0 && runtime.lastMovementTime > 0 &&
+                     now - runtime.lastMovementTime > settings.sizeTimeout) ||
+                    runtime.cursorHidden.load()) {
+                    if (!runtime.isFading) {
+                        runtime.isFading = true;
+                        size_t n = runtime.history.size();
                         if (n > 1) {
                             size_t idx = 0;
-                            for (auto it = g_history.rbegin(); it != g_history.rend(); ++it, ++idx) {
-                                it->t = now - g_tailDuration + (DWORD)((float)idx / (float)(n - 1) * g_tailDuration);
+                            for (auto it = runtime.history.rbegin(); it != runtime.history.rend(); ++it, ++idx) {
+                                it->t = now - settings.tailDuration + (DWORD)((float)idx / (float)(n - 1) * settings.tailDuration);
                             }
                         }
                     }
                     EvictByTime(now);
                 } else {
-                    g_isFading = false;
+                    runtime.isFading = false;
                     // Distance-based eviction: walk from head (newest)
                     // backwards, accumulating pixel distance. Pop
-                    // everything past where cumulative > g_tailSize.
+                    // everything past where cumulative > settings.tailSize.
                     // This makes trail length independent of mouse DPI
                     // and cursor speed.
                     double cumulative = 0.0;
-                    for (size_t i = 1; i < g_history.size(); ++i) {
-                        double dx = (double)g_history[i].pos.x - (double)g_history[i-1].pos.x;
-                        double dy = (double)g_history[i].pos.y - (double)g_history[i-1].pos.y;
+                    for (size_t i = 1; i < runtime.history.size(); ++i) {
+                        double dx = (double)runtime.history[i].pos.x - (double)runtime.history[i-1].pos.x;
+                        double dy = (double)runtime.history[i].pos.y - (double)runtime.history[i-1].pos.y;
                         cumulative += sqrt(dx * dx + dy * dy);
-                        if (cumulative > g_tailSize) {
-                            while (g_history.size() > i)
-                                g_history.pop_back();
+                        if (cumulative > settings.tailSize) {
+                            while (runtime.history.size() > i)
+                                runtime.history.pop_back();
                             break;
                         }
                     }
@@ -897,8 +902,8 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             // Eviction above has already run, so the trail retracts over the
             // tail duration (size-based re-timestamped by the fade path). No
             // new samples are pushed until the cursor is shown again.
-            if (g_cursorHidden.load()) {
-                g_lastOriginCursorValid = false;
+            if (runtime.cursorHidden.load()) {
+                origin.lastCursorValid = false;
                 continue;
             }
 
@@ -908,82 +913,82 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             // image change (arrow → I-beam). None snapshots the offset when a
             // new trail starts so all samples share one coordinate space.
             POINT originOffset;
-            if (g_trailOriginMode != ORIGIN_SMOOTH) {
+            if (settings.trailOriginMode != ORIGIN_SMOOTH) {
                 // Reset smooth-transition state so re-entering smooth mode
                 // snaps cleanly instead of accumulating a stale cursor jump.
-                g_originInitialized = false;
-                g_lastOriginCursorValid = false;
+                origin.initialized = false;
+                origin.lastCursorValid = false;
             }
-            if (g_trailOriginMode == ORIGIN_IMMEDIATE) {
-                std::lock_guard<std::mutex> offsetLock(g_offsetMutex);
-                originOffset = g_cursorVisualOffset;
-            } else if (g_trailOriginMode == ORIGIN_SMOOTH) {
+            if (settings.trailOriginMode == ORIGIN_IMMEDIATE) {
+                std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
+                originOffset = cursor.visualOffset;
+            } else if (settings.trailOriginMode == ORIGIN_SMOOTH) {
                 POINT target;
                 {
-                    std::lock_guard<std::mutex> offsetLock(g_offsetMutex);
-                    target = g_cursorVisualOffset;
+                    std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
+                    target = cursor.visualOffset;
                 }
 
                 // Accumulate raw cursor travel (screen px) for size_based.
                 float dist = 0.0f;
-                if (g_lastOriginCursorValid) {
-                    float ddx = (float)(pt.x - g_lastOriginCursorPos.x);
-                    float ddy = (float)(pt.y - g_lastOriginCursorPos.y);
+                if (origin.lastCursorValid) {
+                    float ddx = (float)(pt.x - origin.lastCursorPos.x);
+                    float ddy = (float)(pt.y - origin.lastCursorPos.y);
                     dist = sqrtf(ddx * ddx + ddy * ddy);
                 }
-                g_lastOriginCursorPos = pt;
-                g_lastOriginCursorValid = true;
+                origin.lastCursorPos = pt;
+                origin.lastCursorValid = true;
 
-                if (!g_originInitialized) {
+                if (!origin.initialized) {
                     // Snap to the current offset on first use (no glide from 0,0).
-                    g_smoothedOffsetX = (float)target.x;
-                    g_smoothedOffsetY = (float)target.y;
-                    g_originTarget = target;
-                    g_originInitialized = true;
-                } else if (!g_originTransitioning &&
-                           (target.x != g_originTarget.x || target.y != g_originTarget.y)) {
+                    origin.smoothedOffsetX = (float)target.x;
+                    origin.smoothedOffsetY = (float)target.y;
+                    origin.target = target;
+                    origin.initialized = true;
+                } else if (!origin.transitioning &&
+                           (target.x != origin.target.x || target.y != origin.target.y)) {
                     // Target changed — start an ease-in-out transition from the
                     // current smoothed value.
-                    g_originFromX = g_smoothedOffsetX;
-                    g_originFromY = g_smoothedOffsetY;
-                    g_originTarget = target;
-                    g_originStartTime = now;
-                    g_originProgressDist = 0.0f;
-                    g_originTransitioning = true;
+                    origin.fromX = origin.smoothedOffsetX;
+                    origin.fromY = origin.smoothedOffsetY;
+                    origin.target = target;
+                    origin.startTime = now;
+                    origin.progressDist = 0.0f;
+                    origin.transitioning = true;
                 }
 
                 // Advance progress: time-driven (time_based) or distance-driven
                 // (size_based), over a third of the configured tail value.
-                if (g_originTransitioning) {
+                if (origin.transitioning) {
                     float p;
-                    if (g_sizeBased) {
-                        g_originProgressDist += dist;
-                        float len = (float)(g_tailSize / 3);
+                    if (settings.sizeBased) {
+                        origin.progressDist += dist;
+                        float len = (float)(settings.tailSize / 3);
                         if (len < 1.0f) len = 1.0f;
-                        p = g_originProgressDist / len;
+                        p = origin.progressDist / len;
                     } else {
-                        float len = (float)(g_tailDuration / 3);
+                        float len = (float)(settings.tailDuration / 3);
                         if (len < 1.0f) len = 1.0f;
-                        p = (float)(now - g_originStartTime) / len;
+                        p = (float)(now - origin.startTime) / len;
                     }
                     if (p > 1.0f) p = 1.0f;
                     float e = Ease(p, INTERP_SMOOTHSTEP);
-                    g_smoothedOffsetX = g_originFromX + (g_originTarget.x - g_originFromX) * e;
-                    g_smoothedOffsetY = g_originFromY + (g_originTarget.y - g_originFromY) * e;
-                    if (p >= 1.0f) g_originTransitioning = false;
+                    origin.smoothedOffsetX = origin.fromX + (origin.target.x - origin.fromX) * e;
+                    origin.smoothedOffsetY = origin.fromY + (origin.target.y - origin.fromY) * e;
+                    if (p >= 1.0f) origin.transitioning = false;
                 } else {
-                    g_smoothedOffsetX = (float)target.x;
-                    g_smoothedOffsetY = (float)target.y;
+                    origin.smoothedOffsetX = (float)target.x;
+                    origin.smoothedOffsetY = (float)target.y;
                 }
 
-                originOffset.x = RoundToLong(g_smoothedOffsetX);
-                originOffset.y = RoundToLong(g_smoothedOffsetY);
+                originOffset.x = RoundToLong(origin.smoothedOffsetX);
+                originOffset.y = RoundToLong(origin.smoothedOffsetY);
             } else {
-                std::lock_guard<std::mutex> offsetLock(g_offsetMutex);
-                if (g_history.empty()) {
-                    g_frozenCursorOffset = g_cursorVisualOffset;
+                std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
+                if (runtime.history.empty()) {
+                    cursor.frozenCursorOffset = cursor.visualOffset;
                 }
-                originOffset = g_frozenCursorOffset;
+                originOffset = cursor.frozenCursorOffset;
             }
 
             POINT newPt = { pt.x + originOffset.x - vX,
@@ -991,9 +996,9 @@ DWORD WINAPI PollThreadProc(LPVOID) {
 
             // === DUPLICATE-SKIP — only blocks push, not eviction ===
             // Eviction has already run above, so it is safe to continue here.
-            if (!g_history.empty() &&
-                g_history.front().pos.x == newPt.x &&
-                g_history.front().pos.y == newPt.y) {
+            if (!runtime.history.empty() &&
+                runtime.history.front().pos.x == newPt.x &&
+                runtime.history.front().pos.y == newPt.y) {
                 // Cursor hasn't moved since last sample — skip push.
                 continue;
             }
@@ -1002,9 +1007,9 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             Sample s;
             s.pos = newPt;
             s.t = now;
-            g_history.push_front(s);
-            g_lastMovementTime = now;
-            g_isFading = false;
+            runtime.history.push_front(s);
+            runtime.lastMovementTime = now;
+            runtime.isFading = false;
         }
     }
     return 0;
@@ -1014,29 +1019,311 @@ DWORD WINAPI PollThreadProc(LPVOID) {
 // OverlayThreadProc). Forward-declare so the compiler knows the signature.
 void CALLBACK MMTimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
 
+// Allocates/recreates the backbuffer bitmap when the screen size changes.
+// Rebuilding the bitmap invalidates the render target, so it is released here.
+static void EnsureBackbuffer(HDC hdcScreen, int vW, int vH) {
+    if (!render.hBitmap || render.cachedVW != vW || render.cachedVH != vH) {
+        if (render.hBitmap) DeleteObject(render.hBitmap);
+        if (render.hdcMem) DeleteDC(render.hdcMem);
+
+        render.hdcMem = CreateCompatibleDC(hdcScreen);
+        render.hBitmap = CreateCompatibleBitmap(hdcScreen, vW, vH);
+        SelectObject(render.hdcMem, render.hBitmap);
+
+        render.cachedVW = vW;
+        render.cachedVH = vH;
+
+        if (render.pDCRenderTarget) {
+            ReleaseRenderTargetResources();
+        }
+    }
+}
+
+// Creates the Direct2D render target and its brushes if not already present.
+static void EnsureRenderTarget() {
+    if (!render.pDCRenderTarget && render.pD2DFactory) {
+        D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
+            D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+            0, 0, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_FEATURE_LEVEL_DEFAULT
+        );
+
+        render.pD2DFactory->CreateDCRenderTarget(&props, &render.pDCRenderTarget);
+        if (render.pDCRenderTarget) {
+            render.pDCRenderTarget->CreateSolidColorBrush(
+                D2D1::ColorF(D2D1::ColorF::White), &render.pDebugBrush);
+            render.pDCRenderTarget->CreateSolidColorBrush(
+                D2D1::ColorF(D2D1::ColorF::Red), &render.pDebugBrushRed);
+            render.pDCRenderTarget->CreateSolidColorBrush(
+                D2D1::ColorF(D2D1::ColorF::Blue), &render.pDebugBrushBlue);
+        }
+    }
+}
+
+// Snapshot runtime.history and build spatially-decimated trail points into smoothed.
+static void BuildTrailPoints(const POINT& pt, int vX, int vY,
+                             std::vector<D2D1_POINT_2F>& smoothed) {
+    // Adaptive min distance: smaller kMinDist for longer trails so decimation
+    // keeps enough waypoints. Scales inversely with kMaxPoints, clamped to [2, 6].
+    size_t kMaxPoints = settings.sizeBased ? (size_t)settings.tailSize : (size_t)settings.tailDuration;
+    if (kMaxPoints < 2) kMaxPoints = 2;
+    float kMinDist = 6.0f * (10.0f / (float)kMaxPoints);
+    if (kMinDist < 2.0f) kMinDist = 2.0f;
+    if (kMinDist > 6.0f) kMinDist = 6.0f;
+
+    smoothed.reserve(kMaxPoints);
+
+    // The front of the deque is the most recent sample (captured by the poll
+    // thread at ~1ms intervals with the cursor-center offset already applied).
+    // Using runtime.history.front() as the head guarantees monotonic ordering.
+    std::lock_guard<std::mutex> lock(runtime.historyMutex);
+    if (runtime.history.empty()) {
+        // No history yet — fall back to the render thread's cursor position.
+        // Read the origin offset under cursor.offsetMutex (nested inside
+        // runtime.historyMutex — consistent lock order everywhere).
+        POINT originOffset;
+        {
+            std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
+            originOffset = (settings.trailOriginMode == ORIGIN_NONE)
+                ? cursor.frozenCursorOffset
+                : cursor.visualOffset;
+        }
+        POINT headPt = { pt.x + originOffset.x - vX,
+                         pt.y + originOffset.y - vY };
+        smoothed.push_back(D2D1::Point2F(
+            (float)headPt.x + settings.tailOffsetX,
+            (float)headPt.y + settings.tailOffsetY));
+    } else {
+        // Point 0: newest poll sample (front of deque).
+        smoothed.push_back(D2D1::Point2F(
+            (float)runtime.history.front().pos.x + settings.tailOffsetX,
+            (float)runtime.history.front().pos.y + settings.tailOffsetY));
+
+        // Spatial decimation: keep only points at least kMinDist pixels apart,
+        // producing evenly-spaced waypoints for consistent Chaikin smoothing.
+        D2D1_POINT_2F prev = smoothed[0];
+        for (const auto& s : runtime.history) {
+            if (smoothed.size() >= kMaxPoints) break;
+            float sx = (float)s.pos.x + settings.tailOffsetX;
+            float sy = (float)s.pos.y + settings.tailOffsetY;
+            float dx = sx - prev.x;
+            float dy = sy - prev.y;
+            if (dx * dx + dy * dy >= kMinDist * kMinDist) {
+                smoothed.push_back(D2D1::Point2F(sx, sy));
+                prev = smoothed.back();
+            }
+        }
+    }
+}
+
+// Chaikin subdivision: smooths corners by inserting intermediate points,
+// roughly doubling count per iteration (2 iterations).
+static void ChaikinSmooth(std::vector<D2D1_POINT_2F>& smoothed) {
+    for (int iter = 0; iter < 2; ++iter) {
+        if (smoothed.size() < 3) break;
+        std::vector<D2D1_POINT_2F> next_s;
+        next_s.reserve(smoothed.size() * 2);
+        next_s.push_back(smoothed.front());
+        for (size_t i = 0; i < smoothed.size() - 1; ++i) {
+            D2D1_POINT_2F p0 = smoothed[i];
+            D2D1_POINT_2F p1 = smoothed[i + 1];
+            next_s.push_back(D2D1::Point2F(2.0f / 3.0f * p0.x + 1.0f / 3.0f * p1.x, 2.0f / 3.0f * p0.y + 1.0f / 3.0f * p1.y));
+            next_s.push_back(D2D1::Point2F(1.0f / 3.0f * p0.x + 2.0f / 3.0f * p1.x, 1.0f / 3.0f * p0.y + 2.0f / 3.0f * p1.y));
+        }
+        next_s.push_back(smoothed.back());
+        smoothed.swap(next_s);
+    }
+}
+
+// Computes the trail's bounding box, expanded for stroke width / anti-aliasing.
+static void ComputeTrailBBox(const std::vector<D2D1_POINT_2F>& smoothed, RECT& bbox) {
+    float minX = smoothed[0].x, maxX = smoothed[0].x;
+    float minY = smoothed[0].y, maxY = smoothed[0].y;
+    for (const auto& p : smoothed) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+    }
+
+    int margin = 32;
+    if (!settings.simpleLineWidths.empty()) {
+        float maxW = settings.simpleLineWidths[0];
+        for (float w : settings.simpleLineWidths) {
+            if (w > maxW) maxW = w;
+        }
+        margin = (int)maxW + 16;
+    }
+    bbox.left   = (LONG)minX - margin;
+    bbox.top    = (LONG)minY - margin;
+    bbox.right  = (LONG)maxX + margin;
+    bbox.bottom = (LONG)maxY + margin;
+}
+
+// Dispatches to the active style renderer and updates the clear flag.
+static void RenderTrail(const std::vector<D2D1_POINT_2F>& smoothed) {
+    if (smoothed.size() >= 2) {
+        if (settings.activeStyle == L"simple_line") {
+            RenderSimpleLineStyle(smoothed);
+        }
+        // Future styles: add else-if branches here, e.g.
+        // else if (settings.activeStyle == L"glow") { RenderGlowStyle(smoothed); }
+        runtime.needsClear = true;
+    } else {
+        runtime.needsClear = false;
+    }
+}
+
+// Draws the debug outline boxes and trail-start marker (when enabled).
+static void DrawDebug(const POINT& pt, int vX, int vY,
+                      const std::vector<D2D1_POINT_2F>& smoothed,
+                      RECT& bbox, bool& hasBBox) {
+    // White/red outline boxes around the detected cursor bitmap and its
+    // visible (alpha-trimmed) pixels.
+    if (settings.debugShowOutline && cursor.bmWidth > 0 && cursor.bmHeight > 0) {
+        POINT centerOffset;
+        {
+            std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
+            centerOffset = cursor.centerOffset;
+        }
+        float boxW = cursor.bmWidth * cursor.dpiScaleX;
+        float boxH = cursor.bmHeight * cursor.dpiScaleY;
+        float boxCx = (float)(pt.x + centerOffset.x - vX);
+        float boxCy = (float)(pt.y + centerOffset.y - vY);
+        D2D1_RECT_F debugBox = D2D1::RectF(boxCx - boxW / 2.0f,
+                                           boxCy - boxH / 2.0f,
+                                           boxCx + boxW / 2.0f,
+                                           boxCy + boxH / 2.0f);
+        if (render.pDebugBrush) {
+            render.pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+            render.pDCRenderTarget->DrawRectangle(debugBox, render.pDebugBrush, 1.0f);
+        }
+        if (cursor.visibleValid && render.pDebugBrushRed) {
+            float baseX = boxCx - boxW / 2.0f;
+            float baseY = boxCy - boxH / 2.0f;
+            D2D1_RECT_F visBox = D2D1::RectF(
+                baseX + cursor.visLeft * cursor.dpiScaleX,
+                baseY + cursor.visTop * cursor.dpiScaleY,
+                baseX + cursor.visRight * cursor.dpiScaleX,
+                baseY + cursor.visBottom * cursor.dpiScaleY);
+            render.pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+            render.pDCRenderTarget->DrawRectangle(visBox, render.pDebugBrushRed, 1.0f);
+        }
+        GrowBBox(bbox, hasBBox,
+                 (LONG)debugBox.left - 1, (LONG)debugBox.top - 1,
+                 (LONG)debugBox.right + 1, (LONG)debugBox.bottom + 1);
+    }
+
+    // Blue "+" marking the exact trail start (head point).
+    if (settings.debugShowOutline && !smoothed.empty() && render.pDebugBrushBlue) {
+        float hx = smoothed[0].x;
+        float hy = smoothed[0].y;
+        const float half = 5.0f;
+        render.pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+        render.pDCRenderTarget->DrawLine(D2D1::Point2F(hx - half, hy),
+                                    D2D1::Point2F(hx + half, hy), render.pDebugBrushBlue, 1.0f);
+        render.pDCRenderTarget->DrawLine(D2D1::Point2F(hx, hy - half),
+                                    D2D1::Point2F(hx, hy + half), render.pDebugBrushBlue, 1.0f);
+        GrowBBox(bbox, hasBBox,
+                 (LONG)hx - (LONG)half - 1, (LONG)hy - (LONG)half - 1,
+                 (LONG)hx + (LONG)half + 1, (LONG)hy + (LONG)half + 1);
+    }
+}
+
+// Blits the backbuffer to the overlay window via UpdateLayeredWindow, using a
+// dirty rect when possible and falling back to full screen otherwise. Skips the
+// blit entirely when there's nothing to show (prevents full-screen compositor
+// updates every frame when the cursor is stationary).
+static void BlitOverlay(HWND hwnd, HDC hdcScreen, int vX, int vY, int vW, int vH,
+                        const RECT& curBBox, bool hasCurBBox) {
+    if (!hasCurBBox && !runtime.hasPrevDirty && !runtime.needsClear) {
+        ReleaseDC(NULL, hdcScreen);
+        return;
+    }
+
+    // Dirty rect = union of current + previous bounding boxes, in backbuffer
+    // coords (origin at 0,0 = virtual screen origin).
+    RECT dirtyRect;
+    bool useDirtyRect = false;
+
+    if (hasCurBBox && runtime.hasPrevDirty) {
+        dirtyRect.left   = (curBBox.left   < runtime.prevDirtyRect.left)   ? curBBox.left   : runtime.prevDirtyRect.left;
+        dirtyRect.top    = (curBBox.top    < runtime.prevDirtyRect.top)    ? curBBox.top    : runtime.prevDirtyRect.top;
+        dirtyRect.right  = (curBBox.right  > runtime.prevDirtyRect.right)  ? curBBox.right  : runtime.prevDirtyRect.right;
+        dirtyRect.bottom = (curBBox.bottom > runtime.prevDirtyRect.bottom) ? curBBox.bottom : runtime.prevDirtyRect.bottom;
+        useDirtyRect = true;
+    } else if (hasCurBBox) {
+        dirtyRect = curBBox;
+        useDirtyRect = true;
+    } else if (runtime.hasPrevDirty) {
+        // No current trail, but previous frame had one — erase it.
+        dirtyRect = runtime.prevDirtyRect;
+        useDirtyRect = true;
+    }
+
+    if (useDirtyRect) {
+        if (dirtyRect.left < 0) dirtyRect.left = 0;
+        if (dirtyRect.top < 0) dirtyRect.top = 0;
+        if (dirtyRect.right > vW) dirtyRect.right = vW;
+        if (dirtyRect.bottom > vH) dirtyRect.bottom = vH;
+
+        // 768x768 cap — if exceeded, fall back to full screen.
+        int dirtyW = dirtyRect.right - dirtyRect.left;
+        int dirtyH = dirtyRect.bottom - dirtyRect.top;
+        if (dirtyW > 768 || dirtyH > 768 || dirtyW <= 0 || dirtyH <= 0) {
+            useDirtyRect = false;
+        }
+    }
+
+    // Update previous-frame tracking for the next tick.
+    if (hasCurBBox) {
+        runtime.prevDirtyRect = curBBox;
+        runtime.hasPrevDirty = true;
+    } else if (!runtime.needsClear) {
+        runtime.prevDirtyRect = { 0, 0, 0, 0 };
+        runtime.hasPrevDirty = false;
+    }
+
+    BLENDFUNCTION blend = { 0 };
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+
+    if (useDirtyRect) {
+        POINT ptPos = { vX + dirtyRect.left, vY + dirtyRect.top };
+        SIZE sizeWnd = { dirtyRect.right - dirtyRect.left,
+                         dirtyRect.bottom - dirtyRect.top };
+        POINT ptSrc = { dirtyRect.left, dirtyRect.top };
+        UpdateLayeredWindow(hwnd, hdcScreen, &ptPos, &sizeWnd,
+                            render.hdcMem, &ptSrc, 0, &blend, ULW_ALPHA);
+    } else {
+        POINT ptPos = { vX, vY };
+        SIZE sizeWnd = { vW, vH };
+        POINT ptSrc = { 0, 0 };
+        UpdateLayeredWindow(hwnd, hdcScreen, &ptPos, &sizeWnd,
+                            render.hdcMem, &ptSrc, 0, &blend, ULW_ALPHA);
+    }
+
+    ReleaseDC(NULL, hdcScreen);
+}
+
 VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime) {
+    UNREFERENCED_PARAMETER(uMsg);
+    UNREFERENCED_PARAMETER(idEvent);
+
     POINT pt;
     GetCursorPos(&pt);
 
-    static DWORD lastFullscreenCheck = 0;
-    static bool needsClear = false;
-
-    // Dirty rect tracking: the previous frame's bounding box (in virtual-screen
-    // coords) so we can erase the old trail when it moves. {0,0,0,0} = no
-    // previous trail (first frame or after full clear).
-    static RECT s_prevDirtyRect = { 0, 0, 0, 0 };
-    static bool s_hasPrevDirty = false;
-
     // Periodically refresh the game-running detection and publish the result
     // to the polling thread via the atomic flag.
-    if (dwTime - lastFullscreenCheck > 500) {
+    if (dwTime - runtime.lastFullscreenCheck > 500) {
         bool gameNow = IsGameRunning();
-        g_isGameRunning.store(gameNow);
-        lastFullscreenCheck = dwTime;
+        runtime.isGameRunning.store(gameNow);
+        runtime.lastFullscreenCheck = dwTime;
     }
 
     // Read local copies of the atomic flags for consistent use within this frame.
-    bool isGameCached = g_isGameRunning.load();
+    bool isGameCached = runtime.isGameRunning.load();
 
     int vX = GetSystemMetrics(SM_XVIRTUALSCREEN);
     int vY = GetSystemMetrics(SM_YVIRTUALSCREEN);
@@ -1045,376 +1332,65 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
 
     if (isGameCached) {
         {
-            std::lock_guard<std::mutex> lock(g_historyMutex);
-            bool wasEmpty = g_history.empty();
-            g_history.clear();
-            if (wasEmpty && !needsClear) {
+            std::lock_guard<std::mutex> lock(runtime.historyMutex);
+            bool wasEmpty = runtime.history.empty();
+            runtime.history.clear();
+            if (wasEmpty && !runtime.needsClear) {
                 return;
             }
         }
     } else {
         // No game running — update cursor appearance caches. The poll thread
-        // owns trail-origin selection (frozen when g_history is empty, unless
-        // g_trailOriginMode is Immediate/Smooth) and sample accumulation.
-        // Time-based eviction retracts the trail naturally when the cursor
-        // stops. The render thread only draws what's in g_history.
+        // owns trail-origin selection (frozen when runtime.history is empty, unless
+        // settings.trailOriginMode is Immediate/Smooth) and sample accumulation.
         UpdateCursorCenterOffset();
     }
 
     // Snapshot the current history size to decide whether to draw.
     bool historyEmpty;
     {
-        std::lock_guard<std::mutex> lock(g_historyMutex);
-        historyEmpty = g_history.empty();
+        std::lock_guard<std::mutex> lock(runtime.historyMutex);
+        historyEmpty = runtime.history.empty();
     }
 
-    if (!historyEmpty || needsClear || (g_debugShowOutline && g_cursorBmWidth > 0 && g_cursorBmHeight > 0)) {
+    if (!historyEmpty || runtime.needsClear || (settings.debugShowOutline && cursor.bmWidth > 0 && cursor.bmHeight > 0)) {
         HDC hdcScreen = GetDC(NULL);
 
-        // Only allocate the massive bitmap once, or if the screen size physically changes
-        if (!g_hBitmap || g_cachedVW != vW || g_cachedVH != vH) {
-            if (g_hBitmap) DeleteObject(g_hBitmap);
-            if (g_hdcMem) DeleteDC(g_hdcMem);
+        EnsureBackbuffer(hdcScreen, vW, vH);
+        EnsureRenderTarget();
 
-            g_hdcMem = CreateCompatibleDC(hdcScreen);
-            g_hBitmap = CreateCompatibleBitmap(hdcScreen, vW, vH);
-            SelectObject(g_hdcMem, g_hBitmap);
-
-            g_cachedVW = vW;
-            g_cachedVH = vH;
-
-            // If the bitmap changed, the render target needs to be rebuilt to match it
-            if (g_pDCRenderTarget) {
-                if (g_pSimpleLineBrush) { g_pSimpleLineBrush->Release(); g_pSimpleLineBrush = nullptr; }
-                if (g_pDebugBrush) { g_pDebugBrush->Release(); g_pDebugBrush = nullptr; }
-                if (g_pDebugBrushRed) { g_pDebugBrushRed->Release(); g_pDebugBrushRed = nullptr; }
-                if (g_pDebugBrushBlue) { g_pDebugBrushBlue->Release(); g_pDebugBrushBlue = nullptr; }
-                g_pDCRenderTarget->Release();
-                g_pDCRenderTarget = nullptr;
-            }
-        }
-
-        // Initialize Direct2D Render Target if we don't have one
-        if (!g_pDCRenderTarget && g_pD2DFactory) {
-            D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
-                D2D1_RENDER_TARGET_TYPE_DEFAULT,
-                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
-                0, 0, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_FEATURE_LEVEL_DEFAULT
-            );
-            
-            g_pD2DFactory->CreateDCRenderTarget(&props, &g_pDCRenderTarget);
-            if (g_pDCRenderTarget) {
-                g_pDCRenderTarget->CreateSolidColorBrush(
-                    D2D1::ColorF(D2D1::ColorF::White), &g_pDebugBrush);
-                g_pDCRenderTarget->CreateSolidColorBrush(
-                    D2D1::ColorF(D2D1::ColorF::Red), &g_pDebugBrushRed);
-                g_pDCRenderTarget->CreateSolidColorBrush(
-                    D2D1::ColorF(D2D1::ColorF::Blue), &g_pDebugBrushBlue);
-            }
-        }
-
-        // Track the current frame's trail bounding box (in backbuffer coords).
-        // Declared here so it's visible after the render target block.
         RECT curBBox = { 0, 0, 0, 0 };
         bool hasCurBBox = false;
 
-        if (g_pDCRenderTarget) {
+        if (render.pDCRenderTarget) {
             RECT rc = { 0, 0, vW, vH };
-            g_pDCRenderTarget->BindDC(g_hdcMem, &rc);
-            
-            g_pDCRenderTarget->BeginDraw();
-            g_pDCRenderTarget->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
-            g_pDCRenderTarget->SetAntialiasMode(g_antialiasing
+            render.pDCRenderTarget->BindDC(render.hdcMem, &rc);
+
+            render.pDCRenderTarget->BeginDraw();
+            render.pDCRenderTarget->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
+            render.pDCRenderTarget->SetAntialiasMode(settings.antialiasing
                 ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE
                 : D2D1_ANTIALIAS_MODE_ALIASED);
 
-            // Step 1 — Snapshot g_history and build trail points
-            // Adaptive min distance: smaller kMinDist for longer trails so
-            // decimation keeps enough waypoints. Scales inversely with kMaxPoints,
-            // clamped to [2, 6].
-            size_t kMaxPoints = g_sizeBased
-                ? (size_t)g_tailSize
-                : (size_t)g_tailDuration;
-            if (kMaxPoints < 2) kMaxPoints = 2;
-            float kMinDist = 6.0f * (10.0f / (float)kMaxPoints);
-            if (kMinDist < 2.0f) kMinDist = 2.0f;
-            if (kMinDist > 6.0f) kMinDist = 6.0f;
-
             std::vector<D2D1_POINT_2F> smoothed;
-            smoothed.reserve(kMaxPoints);
+            BuildTrailPoints(pt, vX, vY, smoothed);
 
-            // Build the trail from g_history. The front of the deque is the most recent
-            // sample (captured by the poll thread at ~1ms intervals with the cursor
-            // center offset already applied). Using g_history.front() as the head
-            // guarantees monotonic ordering — the head is always the newest point, and
-            // all subsequent points are older. This avoids the trail doubling back on
-            // itself when the render thread's GetCursorPos is stale relative to the
-            // poll thread's latest sample.
-            {
-                std::lock_guard<std::mutex> lock(g_historyMutex);
-                if (g_history.empty()) {
-                    // No history yet — fall back to the render thread's cursor position.
-                    // Read the origin offset under g_offsetMutex (nested inside
-                    // g_historyMutex — consistent lock order everywhere).
-                    POINT originOffset;
-                    {
-                        std::lock_guard<std::mutex> offsetLock(g_offsetMutex);
-                        originOffset = (g_trailOriginMode == ORIGIN_NONE)
-                            ? g_frozenCursorOffset
-                            : g_cursorVisualOffset;
-                    }
-                    POINT headPt = { pt.x + originOffset.x - vX,
-                                     pt.y + originOffset.y - vY };
-                    smoothed.push_back(D2D1::Point2F(
-                        (float)headPt.x + g_tailOffsetX,
-                        (float)headPt.y + g_tailOffsetY));
-                } else {
-                    // Point 0: newest poll sample (front of deque)
-                    smoothed.push_back(D2D1::Point2F(
-                        (float)g_history.front().pos.x + g_tailOffsetX,
-                        (float)g_history.front().pos.y + g_tailOffsetY));
-
-                    // Spatial decimation: keep only points at least kMinDist
-                    // pixels apart, producing evenly-spaced waypoints for
-                    // consistent Chaikin smoothing.
-                    D2D1_POINT_2F prev = smoothed[0];
-                    for (const auto& s : g_history) {
-                        if (smoothed.size() >= kMaxPoints) break;
-                        float sx = (float)s.pos.x + g_tailOffsetX;
-                        float sy = (float)s.pos.y + g_tailOffsetY;
-                        float dx = sx - prev.x;
-                        float dy = sy - prev.y;
-                        if (dx * dx + dy * dy >= kMinDist * kMinDist)
-                        {
-                            smoothed.push_back(D2D1::Point2F(sx, sy));
-                            prev = smoothed.back();
-                        }
-                    }
-
-                }
-            }
-
-            bool isDrawing = (smoothed.size() >= 2);
-            if (isDrawing) {
-                // Step 2 — Chaikin subdivision: smooths corners by inserting
-                // intermediate points, roughly doubling count per iteration.
-                for (int iter = 0; iter < 2; ++iter) {
-                        if (smoothed.size() < 3) break;
-                        std::vector<D2D1_POINT_2F> next_s;
-                        next_s.reserve(smoothed.size() * 2);
-                        next_s.push_back(smoothed.front());
-                        for (size_t i = 0; i < smoothed.size() - 1; ++i) {
-                            D2D1_POINT_2F p0 = smoothed[i];
-                            D2D1_POINT_2F p1 = smoothed[i+1];
-                            next_s.push_back(D2D1::Point2F(2.0f/3.0f * p0.x + 1.0f/3.0f * p1.x, 2.0f/3.0f * p0.y + 1.0f/3.0f * p1.y));
-                            next_s.push_back(D2D1::Point2F(1.0f/3.0f * p0.x + 2.0f/3.0f * p1.x, 1.0f/3.0f * p0.y + 2.0f/3.0f * p1.y));
-                        }
-                        next_s.push_back(smoothed.back());
-                        smoothed.swap(next_s);
-                    }
-
-                // Step 3 — Compute trail bounding box
-                float minX = smoothed[0].x, maxX = smoothed[0].x;
-                float minY = smoothed[0].y, maxY = smoothed[0].y;
-                for (const auto& p : smoothed) {
-                    if (p.x < minX) minX = p.x;
-                    if (p.x > maxX) maxX = p.x;
-                    if (p.y < minY) minY = p.y;
-                    if (p.y > maxY) maxY = p.y;
-                }
-                // Expand for stroke width / anti-aliasing
-                int margin = 32;
-                if (!g_simpleLineWidths.empty()) {
-                    float maxW = g_simpleLineWidths[0];
-                    for (float w : g_simpleLineWidths) {
-                        if (w > maxW) maxW = w;
-                    }
-                    margin = (int)maxW + 16;
-                }
-                curBBox.left   = (LONG)minX - margin;
-                curBBox.top    = (LONG)minY - margin;
-                curBBox.right  = (LONG)maxX + margin;
-                curBBox.bottom = (LONG)maxY + margin;
+            if (smoothed.size() >= 2) {
+                ChaikinSmooth(smoothed);
+                ComputeTrailBBox(smoothed, curBBox);
                 hasCurBBox = true;
-
-                // Step 4 — Dispatch to active style renderer
-                if (g_activeStyle == L"simple_line") {
-                    RenderSimpleLineStyle(smoothed);
-                }
-                // Future styles: add else-if branches here, e.g.
-                // else if (g_activeStyle == L"glow") { RenderGlowStyle(smoothed); }
-
-                needsClear = true; 
-            } else {
-                needsClear = false; 
             }
+            RenderTrail(smoothed);
 
-            // DEBUG: draw outline boxes around the detected cursor bitmap and
-            // its visible (alpha-trimmed) pixels, when enabled in settings.
-            if (g_debugShowOutline && g_cursorBmWidth > 0 && g_cursorBmHeight > 0) {
-                POINT centerOffset;
-                {
-                    std::lock_guard<std::mutex> offsetLock(g_offsetMutex);
-                    centerOffset = g_cursorCenterOffset;
-                }
-                float boxW = g_cursorBmWidth * g_cursorDpiScaleX;
-                float boxH = g_cursorBmHeight * g_cursorDpiScaleY;
-                float boxCx = (float)(pt.x + centerOffset.x - vX);
-                float boxCy = (float)(pt.y + centerOffset.y - vY);
-                D2D1_RECT_F debugBox = D2D1::RectF(boxCx - boxW / 2.0f,
-                                                   boxCy - boxH / 2.0f,
-                                                   boxCx + boxW / 2.0f,
-                                                   boxCy + boxH / 2.0f);
-                if (g_pDebugBrush) {
-                    g_pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-                    g_pDCRenderTarget->DrawRectangle(debugBox, g_pDebugBrush, 1.0f);
-                }
-                // DEBUG: red box around the alpha-trimmed (visible) cursor pixels.
-                if (g_cursorVisibleValid && g_pDebugBrushRed) {
-                    float baseX = boxCx - boxW / 2.0f;
-                    float baseY = boxCy - boxH / 2.0f;
-                    D2D1_RECT_F visBox = D2D1::RectF(
-                        baseX + g_cursorVisLeft * g_cursorDpiScaleX,
-                        baseY + g_cursorVisTop * g_cursorDpiScaleY,
-                        baseX + g_cursorVisRight * g_cursorDpiScaleX,
-                        baseY + g_cursorVisBottom * g_cursorDpiScaleY);
-                    g_pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-                    g_pDCRenderTarget->DrawRectangle(visBox, g_pDebugBrushRed, 1.0f);
-                }
-                // Include the box in the dirty rect so it is always blitted.
-                LONG dbgL = (LONG)debugBox.left - 1;
-                LONG dbgT = (LONG)debugBox.top - 1;
-                LONG dbgR = (LONG)debugBox.right + 1;
-                LONG dbgB = (LONG)debugBox.bottom + 1;
-                if (hasCurBBox) {
-                    if (dbgL < curBBox.left) curBBox.left = dbgL;
-                    if (dbgT < curBBox.top) curBBox.top = dbgT;
-                    if (dbgR > curBBox.right) curBBox.right = dbgR;
-                    if (dbgB > curBBox.bottom) curBBox.bottom = dbgB;
-                } else {
-                    curBBox = { dbgL, dbgT, dbgR, dbgB };
-                    hasCurBBox = true;
-                }
-            }
+            DrawDebug(pt, vX, vY, smoothed, curBBox, hasCurBBox);
 
-            // DEBUG: blue "+" marking the exact trail start (head point).
-            if (g_debugShowOutline && !smoothed.empty() && g_pDebugBrushBlue) {
-                float hx = smoothed[0].x;
-                float hy = smoothed[0].y;
-                const float half = 5.0f;
-                g_pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-                g_pDCRenderTarget->DrawLine(D2D1::Point2F(hx - half, hy),
-                                            D2D1::Point2F(hx + half, hy), g_pDebugBrushBlue, 1.0f);
-                g_pDCRenderTarget->DrawLine(D2D1::Point2F(hx, hy - half),
-                                            D2D1::Point2F(hx, hy + half), g_pDebugBrushBlue, 1.0f);
-                // Include the marker in the dirty rect so it is always blitted.
-                LONG pL = (LONG)hx - (LONG)half - 1;
-                LONG pT = (LONG)hy - (LONG)half - 1;
-                LONG pR = (LONG)hx + (LONG)half + 1;
-                LONG pB = (LONG)hy + (LONG)half + 1;
-                if (hasCurBBox) {
-                    if (pL < curBBox.left) curBBox.left = pL;
-                    if (pT < curBBox.top) curBBox.top = pT;
-                    if (pR > curBBox.right) curBBox.right = pR;
-                    if (pB > curBBox.bottom) curBBox.bottom = pB;
-                } else {
-                    curBBox = { pL, pT, pR, pB };
-                    hasCurBBox = true;
-                }
-            }
-
-            HRESULT hr = g_pDCRenderTarget->EndDraw();
+            HRESULT hr = render.pDCRenderTarget->EndDraw();
             if (hr == D2DERR_RECREATE_TARGET) {
-                if (g_pSimpleLineBrush) { g_pSimpleLineBrush->Release(); g_pSimpleLineBrush = nullptr; }
-                if (g_pDebugBrush) { g_pDebugBrush->Release(); g_pDebugBrush = nullptr; }
-                if (g_pDebugBrushRed) { g_pDebugBrushRed->Release(); g_pDebugBrushRed = nullptr; }
-                if (g_pDebugBrushBlue) { g_pDebugBrushBlue->Release(); g_pDebugBrushBlue = nullptr; }
-                g_pDCRenderTarget->Release();
-                g_pDCRenderTarget = nullptr;
+                ReleaseRenderTargetResources();
             }
         }
 
-        // Step 5 — Blit backbuffer to overlay window (dirty rect or full screen)
-        // Skip UpdateLayeredWindow entirely if there's nothing to show
-        // (no current trail, no previous trail to erase, no clear needed).
-        // This prevents full-screen compositor updates every frame when
-        // the cursor is stationary — which caused explorer crashes.
-        if (!hasCurBBox && !s_hasPrevDirty && !needsClear) {
-            ReleaseDC(NULL, hdcScreen);
-            return;
-        }
-
-        // Compute the dirty rect: union of current + previous bounding boxes.
-        // Both are in backbuffer coords (origin at 0,0 = virtual screen origin).
-        RECT dirtyRect;
-        bool useDirtyRect = false;
-
-        if (hasCurBBox && s_hasPrevDirty) {
-            // Union of current and previous
-            dirtyRect.left   = (curBBox.left   < s_prevDirtyRect.left)   ? curBBox.left   : s_prevDirtyRect.left;
-            dirtyRect.top    = (curBBox.top    < s_prevDirtyRect.top)    ? curBBox.top    : s_prevDirtyRect.top;
-            dirtyRect.right  = (curBBox.right  > s_prevDirtyRect.right)  ? curBBox.right  : s_prevDirtyRect.right;
-            dirtyRect.bottom = (curBBox.bottom > s_prevDirtyRect.bottom) ? curBBox.bottom : s_prevDirtyRect.bottom;
-            useDirtyRect = true;
-        } else if (hasCurBBox) {
-            dirtyRect = curBBox;
-            useDirtyRect = true;
-        } else if (s_hasPrevDirty) {
-            // No current trail, but previous frame had one — erase it
-            dirtyRect = s_prevDirtyRect;
-            useDirtyRect = true;
-        }
-
-        // Clamp dirty rect to backbuffer bounds
-        if (useDirtyRect) {
-            if (dirtyRect.left < 0) dirtyRect.left = 0;
-            if (dirtyRect.top < 0) dirtyRect.top = 0;
-            if (dirtyRect.right > vW) dirtyRect.right = vW;
-            if (dirtyRect.bottom > vH) dirtyRect.bottom = vH;
-
-            // Check the 768x768 cap — if exceeded, fall back to full screen
-            int dirtyW = dirtyRect.right - dirtyRect.left;
-            int dirtyH = dirtyRect.bottom - dirtyRect.top;
-            if (dirtyW > 768 || dirtyH > 768 || dirtyW <= 0 || dirtyH <= 0) {
-                useDirtyRect = false;  // fall back to full screen
-            }
-        }
-
-        // Update previous-frame tracking for next tick
-        if (hasCurBBox) {
-            s_prevDirtyRect = curBBox;
-            s_hasPrevDirty = true;
-        } else if (!needsClear) {
-            // Trail fully gone and cleared — reset previous tracking
-            s_prevDirtyRect = { 0, 0, 0, 0 };
-            s_hasPrevDirty = false;
-        }
-
-        BLENDFUNCTION blend = { 0 };
-        blend.BlendOp = AC_SRC_OVER;
-        blend.SourceConstantAlpha = 255; 
-        blend.AlphaFormat = AC_SRC_ALPHA;
-
-        if (useDirtyRect) {
-            // Dirty rect: position the window at the dirty rect's screen
-            // position, size it to the dirty rect, and source from the
-            // corresponding offset in the backbuffer.
-            POINT ptPos = { vX + dirtyRect.left, vY + dirtyRect.top };
-            SIZE sizeWnd = { dirtyRect.right - dirtyRect.left,
-                             dirtyRect.bottom - dirtyRect.top };
-            POINT ptSrc = { dirtyRect.left, dirtyRect.top };
-            UpdateLayeredWindow(hwnd, hdcScreen, &ptPos, &sizeWnd,
-                                g_hdcMem, &ptSrc, 0, &blend, ULW_ALPHA);
-        } else {
-            // Full screen fallback
-            POINT ptPos = { vX, vY };
-            SIZE sizeWnd = { vW, vH };
-            POINT ptSrc = { 0, 0 };
-            UpdateLayeredWindow(hwnd, hdcScreen, &ptPos, &sizeWnd,
-                                g_hdcMem, &ptSrc, 0, &blend, ULW_ALPHA);
-        }
-
-        ReleaseDC(NULL, hdcScreen);
+        BlitOverlay(hwnd, hdcScreen, vX, vY, vW, vH, curBBox, hasCurBBox);
     }
 }
 
@@ -1426,7 +1402,7 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     if (uMsg == WM_TIMER) {
         // Clear before rendering so a frame that arrives while this one is still
         // in flight can queue exactly one more render (bounded, no backlog).
-        g_renderScheduled.store(false);
+        runtime.renderScheduled.store(false);
         SmearTimerProc(hwnd, uMsg, wParam, GetTickCount());
         return 0;
     }
@@ -1438,26 +1414,34 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 // to wake the message loop on the overlay thread, which then runs
 // SmearTimerProc via OverlayWndProc.
 void CALLBACK MMTimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2) {
+    UNREFERENCED_PARAMETER(uTimerID);
+    UNREFERENCED_PARAMETER(uMsg);
+    UNREFERENCED_PARAMETER(dwUser);
+    UNREFERENCED_PARAMETER(dw1);
+    UNREFERENCED_PARAMETER(dw2);
+
     // Coalesce: only post if no render is already pending. PostMessage does not
     // coalesce like SetTimer, so an unthrottled post every 8ms builds an
     // unbounded WM_TIMER backlog whenever a frame runs long.
-    if (g_overlayHwnd && !g_renderScheduled.exchange(true)) {
-        if (!PostMessage(g_overlayHwnd, WM_TIMER, 1, 0)) {
+    if (runtime.overlayHwnd && !runtime.renderScheduled.exchange(true)) {
+        if (!PostMessage(runtime.overlayHwnd, WM_TIMER, 1, 0)) {
             // Window is gone or queue failed; clear so future renders aren't
             // permanently blocked.
-            g_renderScheduled.store(false);
+            runtime.renderScheduled.store(false);
         }
     }
 }
 
 DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
+    UNREFERENCED_PARAMETER(lpParam);
+
     // Direct2D demands COM to be initialized on this thread before it will talk to us
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
     // Tell Windows we aren't a blurry legacy piece of shit so mixed-DPI monitors don't fuck up the math
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_pD2DFactory);
+    D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &render.pD2DFactory);
 
     HINSTANCE hInstance = GetModuleHandle(NULL);
     const wchar_t CLASS_NAME[] = L"SmearFrameOverlayClass";
@@ -1474,7 +1458,7 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     int screenW = GetSystemMetrics(SM_CXVIRTUALSCREEN);
     int screenH = GetSystemMetrics(SM_CYVIRTUALSCREEN) - 1;
 
-    g_overlayHwnd = CreateWindowEx(
+    runtime.overlayHwnd = CreateWindowEx(
         WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         CLASS_NAME,
         L"SmearOverlay",
@@ -1483,15 +1467,15 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
         NULL, NULL, hInstance, NULL
     );
 
-    if (!g_overlayHwnd) return 0;
+    if (!runtime.overlayHwnd) return 0;
 
-    ShowWindow(g_overlayHwnd, SW_SHOWNA);
+    ShowWindow(runtime.overlayHwnd, SW_SHOWNA);
 
     // Start the high-frequency cursor polling thread.
     // The stop event is a manual-reset event, initially non-signalled.
-    g_pollStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-    if (g_pollStopEvent) {
-        g_pollThread = CreateThread(NULL, 0, PollThreadProc, NULL, 0, NULL);
+    runtime.pollStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (runtime.pollStopEvent) {
+        runtime.pollThread = CreateThread(NULL, 0, PollThreadProc, NULL, 0, NULL);
     }
 
     // Use a multimedia timer instead of SetTimer. Multimedia timers have ~1ms
@@ -1504,7 +1488,7 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     // The poll thread samples at 1ms independently; this timer only controls
     // how often the overlay is redrawn.
     const int kRenderIntervalMs = 8;
-    g_mmTimerId = timeSetEvent(kRenderIntervalMs, 1, MMTimerCallback, 0, TIME_PERIODIC);
+    runtime.mmTimerId = timeSetEvent(kRenderIntervalMs, 1, MMTimerCallback, 0, TIME_PERIODIC);
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
@@ -1513,40 +1497,36 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     }
 
     // Stop the polling thread gracefully before tearing down D2D resources.
-    if (g_pollStopEvent) {
-        SetEvent(g_pollStopEvent);
+    if (runtime.pollStopEvent) {
+        SetEvent(runtime.pollStopEvent);
     }
-    if (g_pollThread) {
-        WaitForSingleObject(g_pollThread, 200);
-        CloseHandle(g_pollThread);
-        g_pollThread = NULL;
+    if (runtime.pollThread) {
+        WaitForSingleObject(runtime.pollThread, 200);
+        CloseHandle(runtime.pollThread);
+        runtime.pollThread = NULL;
     }
-    if (g_pollStopEvent) {
-        CloseHandle(g_pollStopEvent);
-        g_pollStopEvent = NULL;
+    if (runtime.pollStopEvent) {
+        CloseHandle(runtime.pollStopEvent);
+        runtime.pollStopEvent = NULL;
     }
 
     // Clean up our massive GPU footprint before checking out
-    if (g_pSimpleLineBrush) { g_pSimpleLineBrush->Release(); g_pSimpleLineBrush = nullptr; }
-    if (g_pDebugBrush) { g_pDebugBrush->Release(); g_pDebugBrush = nullptr; }
-    if (g_pDebugBrushRed) { g_pDebugBrushRed->Release(); g_pDebugBrushRed = nullptr; }
-    if (g_pDebugBrushBlue) { g_pDebugBrushBlue->Release(); g_pDebugBrushBlue = nullptr; }
-    if (g_pStrokeStyle) { g_pStrokeStyle->Release(); g_pStrokeStyle = nullptr; }
-    if (g_pDCRenderTarget) { g_pDCRenderTarget->Release(); g_pDCRenderTarget = nullptr; }
-    if (g_pD2DFactory) { g_pD2DFactory->Release(); g_pD2DFactory = nullptr; }
+    ReleaseRenderTargetResources();
+    if (render.pStrokeStyle) { render.pStrokeStyle->Release(); render.pStrokeStyle = nullptr; }
+    if (render.pD2DFactory) { render.pD2DFactory->Release(); render.pD2DFactory = nullptr; }
 
-    if (g_hBitmap) DeleteObject(g_hBitmap);
-    if (g_hdcMem) DeleteDC(g_hdcMem);
+    if (render.hBitmap) DeleteObject(render.hBitmap);
+    if (render.hdcMem) DeleteDC(render.hdcMem);
 
     // Kill the multimedia timer if still running (may have been killed
     // already by WhTool_ModUninit) and restore default timer resolution.
-    if (g_mmTimerId) {
-        timeKillEvent(g_mmTimerId);
-        g_mmTimerId = 0;
+    if (runtime.mmTimerId) {
+        timeKillEvent(runtime.mmTimerId);
+        runtime.mmTimerId = 0;
     }
     timeEndPeriod(1);
 
-    DestroyWindow(g_overlayHwnd);
+    DestroyWindow(runtime.overlayHwnd);
     UnregisterClass(CLASS_NAME, hInstance);
 
     CoUninitialize();
@@ -1555,7 +1535,7 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
 
 BOOL WhTool_ModInit() {
     LoadSettings();
-    g_threadHandle = CreateThread(NULL, 0, OverlayThreadProc, NULL, 0, &g_overlayThreadId);
+    runtime.threadHandle = CreateThread(NULL, 0, OverlayThreadProc, NULL, 0, &runtime.overlayThreadId);
     return TRUE;
 }
 
@@ -1563,31 +1543,31 @@ void WhTool_ModUninit() {
     // Signal the polling thread to stop. The overlay thread's cleanup block
     // will also signal it and wait, but signalling here first ensures the poll
     // thread begins shutting down before the overlay window's WM_QUIT is posted.
-    if (g_pollStopEvent) {
-        SetEvent(g_pollStopEvent);
+    if (runtime.pollStopEvent) {
+        SetEvent(runtime.pollStopEvent);
     }
 
     // Kill the multimedia timer BEFORE posting WM_QUIT. The timer posts
     // WM_TIMER messages at 125Hz; if left running, they flood the message
     // queue and starve WM_QUIT, causing the unload to hang forever.
-    if (g_mmTimerId) {
-        timeKillEvent(g_mmTimerId);
-        g_mmTimerId = 0;
+    if (runtime.mmTimerId) {
+        timeKillEvent(runtime.mmTimerId);
+        runtime.mmTimerId = 0;
         Sleep(20);  // Let any in-flight MMTimerCallback fire and complete
     }
 
-    if (g_overlayThreadId) {
-        PostThreadMessage(g_overlayThreadId, WM_QUIT, 0, 0);
+    if (runtime.overlayThreadId) {
+        PostThreadMessage(runtime.overlayThreadId, WM_QUIT, 0, 0);
     }
-    if (g_threadHandle) {
-        DWORD waitResult = WaitForSingleObject(g_threadHandle, 5000);
+    if (runtime.threadHandle) {
+        DWORD waitResult = WaitForSingleObject(runtime.threadHandle, 5000);
         if (waitResult == WAIT_TIMEOUT) {
             // Safety net: if the overlay thread didn't exit cleanly in 5s,
             // force-terminate to avoid hanging Windhawk's unload.
-            TerminateThread(g_threadHandle, 0);
+            TerminateThread(runtime.threadHandle, 0);
         }
-        CloseHandle(g_threadHandle);
-        g_threadHandle = NULL;
+        CloseHandle(runtime.threadHandle);
+        runtime.threadHandle = NULL;
     }
 }
 
