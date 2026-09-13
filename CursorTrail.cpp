@@ -10,7 +10,53 @@
 // ==/WindhawkMod==
 
 // ==WindhawkModReadme==
-/*...*/
+/*
+# Cursor trail
+
+Draws a trail behind the mouse cursor that follows its movement.
+
+## Style
+
+- **Simple line** — a line whose width, color, and opacity can change
+  along its length.
+
+## Trail behavior
+
+- **Trail mode** — choose how the trail disappears:
+  - *Time based*: each part of the trail fades after a set duration.
+  - *Size based*: the trail keeps a fixed length, even when the cursor stops.
+- **Tail duration / Tail length** — how long (ms) or how far (px) the trail
+  extends.
+- **Timeout** (size based only) — how long the cursor must be still before
+  the trail starts fading (0 = always visible).
+- **Trail origin on cursor change** — what happens when the cursor image
+  changes: *None* freezes the origin, *Immediate* snaps to the new cursor
+  center, *Smooth* glides there.
+- The trail fades out when the cursor is hidden (e.g. while typing), and
+  rendering pauses over fullscreen games.
+
+## Appearance
+
+- **Width** — comma-separated stroke widths from head to tail, e.g. `2,1`
+  for a tapered trail, or `10,1,10,1` for a pulsing one. Repeat a value to
+  give it a bigger share (`2,2,2,2,1` = 80% at 2, 20% at 1).
+- **Color** — a single hex color (`RRGGBB`) or a comma-separated list for a
+  gradient from head to tail (e.g. `000000,FF0000,FFFFFF`).
+- **Blend width** — how much each color transition blends: `0` for hard
+  bands, `100` for a full gradient.
+- **Interpolation** — curve used to blend between colors (*Linear*,
+  *Smoothstep*, *Ease in*, *Ease out*).
+- **Opacity** — comma-separated opacity percentages (0–100) from head to
+  tail, e.g. `100,0` to fade out.
+- **Antialiasing** — smooth or hard trail edges.
+
+## Fine-tuning
+
+- **Trail offset (X / Y)** — nudge the trail origin in pixels; it is
+  centered on the cursor by default.
+- **Debug: Show outline** — overlay boxes on the detected cursor and trail
+  start to check alignment.
+*/
 // ==/WindhawkModReadme==
 
 // ==WindhawkModSettings==
