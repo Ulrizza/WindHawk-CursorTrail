@@ -1,7 +1,7 @@
 // ==WindhawkMod==
 // @id              cursor-trail
 // @name            Cursor trail
-// @description     Cursor trail overlay with configurable styles (simple line)
+// @description     Cursor trail overlay with configurable styles (simple line, cursor ghost)
 // @version         0.13
 // @author          Ulrizza
 // @license         MIT
@@ -15,18 +15,23 @@
 
 Draws a trail behind the mouse cursor that follows its movement.
 
-## Style
+## Styles
 
 - **Simple line** — a line whose width, color, and opacity can change
   along its length.
+- **Cursor ghost** — faded copies of the cursor image, each latched at the
+  spot where it was spawned (they stay put and only fade out). Each copy
+  keeps the exact cursor image from when it was sampled, so an image change
+  (e.g. arrow to I-beam) appears gradually along the trail.
 
 ## Trail behavior
 
 - **Trail mode** — choose how the trail disappears:
   - *Time based*: each part of the trail fades after a set duration.
-  - *Size based*: the trail keeps a fixed length, even when the cursor stops.
+  - *Size based*: the trail keeps a fixed length (for Cursor ghost, a fixed
+    number of cursor copies), even when the cursor stops.
 - **Tail duration / Tail length** — how long (ms) or how far (px) the trail
-  extends.
+  extends. For Cursor ghost, the size-based value is the number of copies.
 - **Timeout** (size based only) — how long the cursor must be still before
   the trail starts fading (0 = always visible).
 - **Trail origin on cursor change** — what happens when the cursor image
@@ -127,6 +132,32 @@ Draws a trail behind the mouse cursor that follows its movement.
       $description: Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade, or "100,0,100" for a pulse). Each value gets an equal share; repeat to widen. Leave one value for uniform opacity.
     $name: Opacity
   $name: Simple line options
+- ghostOptions:
+  - trail_mode: "time_based"
+    $name: Trail mode
+    $description: Time based fades the copies over time; Size based keeps a fixed number of copies even when the cursor stops
+    $options:
+    - time_based: Time based
+    - size_based: Size based
+  - timeBased:
+    - tail_duration: 300
+      $name: Tail duration
+      $description: How long each cursor copy stays visible, in milliseconds. Minimum 20.
+    $name: Time based
+  - sizeBased:
+    - tail_size: 20
+      $name: Copies
+      $description: Number of cursor copies in the trail (Size based mode). Minimum 2.
+    $name: Size based
+  - spacing: 10
+    $name: Copy spacing
+    $description: Extra distance in pixels added between cursor copies (0 = automatic, speed-adaptive).
+  - opacity:
+    - values: "100,20"
+      $name: Values
+      $description: Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade). Each value gets an equal share; repeat to widen.
+    $name: Opacity
+  $name: Cursor ghost options
 - tail_offset:
   - x: 0
     $name: X
@@ -150,16 +181,19 @@ Draws a trail behind the mouse cursor that follows its movement.
 #include <shellscalingapi.h>
 #include <wincodec.h>
 #include <mmsystem.h>
+#include <algorithm>
 #include <atomic>
 #include <deque>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Position sample used by the polling thread and spatial decimation in the render loop.
 struct Sample {
     POINT pos;
     DWORD t;  // Timestamp captured at sampling time (timeGetTime())
+    HCURSOR cursor;  // Cursor image active at sampling time (frozen per-copy image)
 };
 
 // Global state variables
@@ -181,6 +215,9 @@ struct Settings {
     DWORD sizeTimeout = 0;
     bool  antialiasing = true;
     bool  debugShowOutline = false;
+    bool  isGhost = false;                            // active style is cursor_ghost
+    int   ghostSpacing = 0;                           // extra px between ghost copies
+    float ghostSpawnDist = 2.0f;                      // px cursor must travel before a new ghost is stamped
 
     std::wstring    activeStyle = L"simple_line";
     std::wstring    trailOriginOnCursorChange = L"smooth";
@@ -196,8 +233,23 @@ struct Settings {
     std::vector<float> simpleLineOpacityValues;       // parsed opacity alphas (0.0-1.0)
 };
 
+// Per-cursor geometry, cached per HCURSOR so the ghost style can place copies
+// of the exact image that was on screen at sample time. Render-thread-only.
+struct CursorGeom {
+    bool  valid = false;
+    int   bmWidth = 0, bmHeight = 0;
+    float dpiScaleX = 1.0f, dpiScaleY = 1.0f;
+    int   hotspotX = 0, hotspotY = 0;  // hotspot in native bitmap pixels
+    POINT centerOffset = { 0, 0 };   // hotspot → bitmap center (scaled)
+    POINT visualOffset = { 0, 0 };   // hotspot → visible-pixel center (scaled)
+    float visCenterX = 0.0f, visCenterY = 0.0f;  // visible center in bitmap pixels
+    bool  visibleValid = false;
+    int   visLeft = 0, visTop = 0, visRight = 0, visBottom = 0;
+};
+
 // Cursor geometry cache. The center/visual/frozen offsets are shared with the
-// poll thread via offsetMutex; the debug dimensions below are render-thread-only.
+// poll thread via offsetMutex; the debug dimensions and geomCache below are
+// render-thread-only.
 struct CursorState {
     HCURSOR cachedCursor = NULL;
     POINT   centerOffset = { 0, 0 };  // hotspot → bitmap center (anchors debug boxes)
@@ -209,6 +261,8 @@ struct CursorState {
     float dpiScaleX = 1.0f, dpiScaleY = 1.0f;
     bool  visibleValid = false;             // visible (alpha-trimmed) bounds
     int   visLeft = 0, visTop = 0, visRight = 0, visBottom = 0;
+
+    std::unordered_map<HCURSOR, CursorGeom> geomCache;  // render-thread-only per-cursor geometry
 };
 
 // Ease-in-out origin transition state (poll-thread-owned).
@@ -225,6 +279,14 @@ struct OriginTransition {
 };
 
 // Direct2D + backbuffer resources.
+// A cursor image pre-scaled to its on-screen pixel size, so the ghost style can
+// blit it 1:1 instead of resampling it every frame.
+struct CachedCursorBitmap {
+    ID2D1Bitmap* bitmap = nullptr;
+    UINT width = 0, height = 0;    // pixel size of the cached (scaled) bitmap
+    int  targetW = 0, targetH = 0; // requested on-screen size, for invalidation
+};
+
 struct RenderResources {
     ID2D1Factory*         pD2DFactory = nullptr;
     ID2D1DCRenderTarget*  pDCRenderTarget = nullptr;
@@ -234,6 +296,10 @@ struct RenderResources {
     ID2D1SolidColorBrush* pDebugBrush = nullptr;
     ID2D1SolidColorBrush* pDebugBrushRed = nullptr;
     ID2D1SolidColorBrush* pDebugBrushBlue = nullptr;
+
+    // Cursor ghost style: per-HCURSOR D2D bitmaps, built lazily when a new
+    // cursor image appears and released with the render target.
+    std::unordered_map<HCURSOR, CachedCursorBitmap> cursorBitmapCache;
 
     HDC     hdcMem = NULL;                  // cached backbuffer
     HBITMAP hBitmap = NULL;
@@ -356,48 +422,88 @@ void LoadSettings() {
 
     settings.debugShowOutline = Wh_GetIntSetting(L"debug.show_outline") != 0;
 
-    // Trail mode
-    settings.sizeBased = ReadStringSetting(L"simpleLineOptions.trail_mode", L"time_based") == L"size_based";
-
-    settings.antialiasing = ReadStringSetting(L"simpleLineOptions.antialiasing", L"true") != L"false";
-
-    settings.trailOriginOnCursorChange = ReadStringSetting(L"simpleLineOptions.trail_origin_on_cursor_change", L"smooth");
-    if (settings.trailOriginOnCursorChange != L"none" &&
-        settings.trailOriginOnCursorChange != L"immediate" &&
-        settings.trailOriginOnCursorChange != L"smooth") {
-        settings.trailOriginOnCursorChange = L"smooth";
-    }
-
-    settings.tailDuration = Wh_GetIntSetting(L"simpleLineOptions.timeBased.tail_duration");
-    settings.tailSize = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.tail_size");
-    settings.sizeTimeout = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.timeout");
-
     settings.activeStyle = ReadStringSetting(L"style", L"simple_line");
 
     // RG-3: unknown style value → fallback to simple_line
     if (settings.activeStyle != L"simple_line" && settings.activeStyle != L"cursor_ghost") {
         settings.activeStyle = L"simple_line";
     }
+    settings.isGhost = (settings.activeStyle == L"cursor_ghost");
 
-    // Re-anchor the trail origin on cursor image changes.
-    if (settings.trailOriginOnCursorChange == L"immediate") {
-        settings.trailOriginMode = ORIGIN_IMMEDIATE;
-    } else if (settings.trailOriginOnCursorChange == L"smooth") {
-        settings.trailOriginMode = ORIGIN_SMOOTH;
+    if (settings.isGhost) {
+        // Cursor ghost has its own trail options. sizeBased.tail_size is the
+        // number of cursor copies (not pixels); tailDuration still drives the
+        // fade when the cursor is hidden.
+        settings.sizeBased = ReadStringSetting(L"ghostOptions.trail_mode", L"time_based") == L"size_based";
+        settings.tailDuration = Wh_GetIntSetting(L"ghostOptions.timeBased.tail_duration");
+        settings.tailSize = Wh_GetIntSetting(L"ghostOptions.sizeBased.tail_size");
+        settings.ghostSpacing = Wh_GetIntSetting(L"ghostOptions.spacing");
+        if (settings.ghostSpacing < 0) settings.ghostSpacing = 0;
+        if (settings.ghostSpacing > 200) settings.ghostSpacing = 200;
+        settings.sizeTimeout = 0;
+        settings.antialiasing = true;                  // ghost always uses linear bitmap interpolation
+        settings.trailOriginMode = ORIGIN_IMMEDIATE;   // unused by ghost (samples store the raw hotspot)
+
+        // Distance the cursor must travel before a new ghost copy is stamped.
+        // Ghosts are latched at their spawn position, so this controls the gap
+        // between copies (same auto-gap formula the line decimation used).
+        {
+            size_t kMaxPoints = settings.sizeBased ? (size_t)settings.tailSize
+                                                   : (size_t)settings.tailDuration;
+            if (kMaxPoints < 2) kMaxPoints = 2;
+            float d = 6.0f * (10.0f / (float)kMaxPoints);
+            if (d < 2.0f) d = 2.0f;
+            if (d > 6.0f) d = 6.0f;
+            d += (float)settings.ghostSpacing;
+            if (d < 1.0f) d = 1.0f;
+            settings.ghostSpawnDist = d;
+        }
+
+        ParseFloatList(L"ghostOptions.opacity.values", L"100", 0.0f, 100.0f, 100.0f, settings.simpleLineOpacityValues);
+        for (float& v : settings.simpleLineOpacityValues) v /= 100.0f;
     } else {
-        settings.trailOriginMode = ORIGIN_NONE;
+        // Trail mode
+        settings.sizeBased = ReadStringSetting(L"simpleLineOptions.trail_mode", L"time_based") == L"size_based";
+
+        settings.antialiasing = ReadStringSetting(L"simpleLineOptions.antialiasing", L"true") != L"false";
+
+        settings.trailOriginOnCursorChange = ReadStringSetting(L"simpleLineOptions.trail_origin_on_cursor_change", L"smooth");
+        if (settings.trailOriginOnCursorChange != L"none" &&
+            settings.trailOriginOnCursorChange != L"immediate" &&
+            settings.trailOriginOnCursorChange != L"smooth") {
+            settings.trailOriginOnCursorChange = L"smooth";
+        }
+
+        settings.tailDuration = Wh_GetIntSetting(L"simpleLineOptions.timeBased.tail_duration");
+        settings.tailSize = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.tail_size");
+        settings.sizeTimeout = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.timeout");
+
+        // Re-anchor the trail origin on cursor image changes.
+        if (settings.trailOriginOnCursorChange == L"immediate") {
+            settings.trailOriginMode = ORIGIN_IMMEDIATE;
+        } else if (settings.trailOriginOnCursorChange == L"smooth") {
+            settings.trailOriginMode = ORIGIN_SMOOTH;
+        } else {
+            settings.trailOriginMode = ORIGIN_NONE;
+        }
+
+        // Parse opacity values (percentages 0-100), then convert to 0-1 alphas.
+        ParseFloatList(L"simpleLineOptions.opacity.values", L"100", 0.0f, 100.0f, 100.0f, settings.simpleLineOpacityValues);
+        for (float& v : settings.simpleLineOpacityValues) v /= 100.0f;
     }
 
     if (settings.tailDuration < 20) settings.tailDuration = 20;
-    if (settings.tailSize < 20) settings.tailSize = 20;
+    if (settings.isGhost) {
+        // tail_size is a copy count for the ghost style.
+        if (settings.tailSize < 2) settings.tailSize = 2;
+        if (settings.tailSize > 512) settings.tailSize = 512;
+    } else {
+        if (settings.tailSize < 20) settings.tailSize = 20;
+    }
     if (settings.sizeTimeout < 0) settings.sizeTimeout = 0;
 
     // Parse width values (min 1, no upper clamp)
     ParseFloatList(L"simpleLineOptions.width.values", L"1", 1.0f, 1e30f, 1.0f, settings.simpleLineWidths);
-
-    // Parse opacity values (percentages 0-100), then convert to 0-1 alphas.
-    ParseFloatList(L"simpleLineOptions.opacity.values", L"100", 0.0f, 100.0f, 100.0f, settings.simpleLineOpacityValues);
-    for (float& v : settings.simpleLineOpacityValues) v /= 100.0f;
 
     // Parse color values
     settings.simpleLineColorsRGB.clear();
@@ -562,10 +668,60 @@ static void ComputeVisibleBounds(HBITMAP hbm, int& left, int& top, int& right, i
     pWicFactory->Release();
 }
 
-// Compute the offsets from the cursor's hotspot to (a) the bitmap center, used
-// to anchor the debug outline boxes, and (b) the visible-pixel center, used as
-// the trail origin. Cached per-HCURSOR so we only do the work when the cursor
-// shape actually changes.
+// Computes geometry for one cursor image (bitmap dims, DPI scale, hotspot to
+// bitmap/visible center). Returns false if the cursor cannot be queried.
+static bool ComputeCursorGeom(HCURSOR hCursor, CursorGeom& g) {
+    g = CursorGeom();
+    if (!hCursor) return false;
+
+    ICONINFO ii = { };
+    if (!GetIconInfo(hCursor, &ii)) return false;
+
+    int bmWidth = 0, bmHeight = 0;
+    HBITMAP hbmToUse = NULL;
+    ResolveCursorBitmapDimensions(ii, bmWidth, bmHeight, hbmToUse);
+
+    if (bmWidth > 0 && bmHeight > 0) {
+        int actualX = 0, actualY = 0;
+        GetActualCursorSize(actualX, actualY);
+        float sx = (float)actualX / (float)bmWidth;
+        float sy = (float)actualY / (float)bmHeight;
+
+        g.bmWidth = bmWidth;
+        g.bmHeight = bmHeight;
+        g.dpiScaleX = sx;
+        g.dpiScaleY = sy;
+        g.hotspotX = (int)ii.xHotspot;
+        g.hotspotY = (int)ii.yHotspot;
+
+        // Bitmap center (anchors the debug outline boxes).
+        g.centerOffset.x = (int)(((bmWidth / 2.0f) - (int)ii.xHotspot) * sx + 0.5f);
+        g.centerOffset.y = (int)(((bmHeight / 2.0f) - (int)ii.yHotspot) * sy + 0.5f);
+
+        // Visible-pixel center (trail origin). Falls back to the bitmap center.
+        ComputeVisibleBounds(hbmToUse, g.visLeft, g.visTop,
+                             g.visRight, g.visBottom, g.visibleValid);
+        float visCx = bmWidth / 2.0f;
+        float visCy = bmHeight / 2.0f;
+        if (g.visibleValid) {
+            visCx = (g.visLeft + g.visRight) / 2.0f;
+            visCy = (g.visTop + g.visBottom) / 2.0f;
+        }
+        g.visCenterX = visCx;
+        g.visCenterY = visCy;
+        g.visualOffset.x = (int)((visCx - (int)ii.xHotspot) * sx + 0.5f);
+        g.visualOffset.y = (int)((visCy - (int)ii.yHotspot) * sy + 0.5f);
+        g.valid = true;
+    }
+
+    FreeIconInfoBitmaps(ii);
+    return g.valid;
+}
+
+// Update the cached geometry for the current cursor. The current cursor's
+// geometry is also published in the scalar cursor.* fields for the poll thread
+// (trail origin) and the debug overlay; the full per-cursor geometry lives in
+// cursor.geomCache so the ghost style can place older cursor images too.
 void UpdateCursorCenterOffset() {
     std::lock_guard<std::mutex> lock(cursor.offsetMutex);
 
@@ -583,11 +739,11 @@ void UpdateCursorCenterOffset() {
     runtime.cursorHidden.store(false);
 
     if (ci.hCursor == cursor.cachedCursor) {
-        return;  // same cursor as last frame, reuse cached offset
+        return;  // same cursor as last frame, reuse cached geometry
     }
 
-    ICONINFO ii = { };
-    if (!GetIconInfo(ci.hCursor, &ii)) {
+    CursorGeom g;
+    if (!ComputeCursorGeom(ci.hCursor, g)) {
         cursor.centerOffset = { 0, 0 };
         cursor.visualOffset = { 0, 0 };
         cursor.visibleValid = false;
@@ -597,48 +753,124 @@ void UpdateCursorCenterOffset() {
         return;
     }
 
-    int bmWidth = 0, bmHeight = 0;
-    HBITMAP hbmToUse = NULL;
-    ResolveCursorBitmapDimensions(ii, bmWidth, bmHeight, hbmToUse);
+    cursor.geomCache[ci.hCursor] = g;
 
-    if (bmWidth > 0 && bmHeight > 0) {
-        int actualX = 0, actualY = 0;
-        GetActualCursorSize(actualX, actualY);
-        float sx = (float)actualX / (float)bmWidth;
-        float sy = (float)actualY / (float)bmHeight;
-
-        // Cache the bitmap dimensions and DPI scale for the debug outline boxes.
-        cursor.bmWidth = bmWidth;
-        cursor.bmHeight = bmHeight;
-        cursor.dpiScaleX = sx;
-        cursor.dpiScaleY = sy;
-
-        // Bitmap center (anchors the debug outline boxes).
-        cursor.centerOffset.x = (int)(((bmWidth / 2.0f) - (int)ii.xHotspot) * sx + 0.5f);
-        cursor.centerOffset.y = (int)(((bmHeight / 2.0f) - (int)ii.yHotspot) * sy + 0.5f);
-
-        // Visible-pixel center (trail origin). Falls back to the bitmap center.
-        ComputeVisibleBounds(hbmToUse, cursor.visLeft, cursor.visTop,
-                             cursor.visRight, cursor.visBottom, cursor.visibleValid);
-        float visCx = bmWidth / 2.0f;
-        float visCy = bmHeight / 2.0f;
-        if (cursor.visibleValid) {
-            visCx = (cursor.visLeft + cursor.visRight) / 2.0f;
-            visCy = (cursor.visTop + cursor.visBottom) / 2.0f;
-        }
-        cursor.visualOffset.x = (int)((visCx - (int)ii.xHotspot) * sx + 0.5f);
-        cursor.visualOffset.y = (int)((visCy - (int)ii.yHotspot) * sy + 0.5f);
-    } else {
-        cursor.centerOffset = { 0, 0 };
-        cursor.visualOffset = { 0, 0 };
-        cursor.visibleValid = false;
-        cursor.bmWidth = 0;
-        cursor.bmHeight = 0;
-    }
-
-    FreeIconInfoBitmaps(ii);
+    cursor.centerOffset = g.centerOffset;
+    cursor.visualOffset = g.visualOffset;
+    cursor.bmWidth = g.bmWidth;
+    cursor.bmHeight = g.bmHeight;
+    cursor.dpiScaleX = g.dpiScaleX;
+    cursor.dpiScaleY = g.dpiScaleY;
+    cursor.visibleValid = g.visibleValid;
+    cursor.visLeft = g.visLeft;
+    cursor.visTop = g.visTop;
+    cursor.visRight = g.visRight;
+    cursor.visBottom = g.visBottom;
 
     cursor.cachedCursor = ci.hCursor;
+}
+
+// Look up geometry for any cursor handle, computing and caching it on first use
+// (so old cursor images referenced by the trail still resolve). Returns false
+// when the handle is null or cannot be queried (e.g. already destroyed).
+static bool GetCursorGeom(HCURSOR hCursor, CursorGeom& out) {
+    if (!hCursor) return false;
+    auto it = cursor.geomCache.find(hCursor);
+    if (it != cursor.geomCache.end()) {
+        if (!it->second.valid) return false;
+        out = it->second;
+        return true;
+    }
+    CursorGeom g;
+    if (ComputeCursorGeom(hCursor, g)) {
+        cursor.geomCache.emplace(hCursor, g);
+        out = g;
+        return true;
+    }
+    cursor.geomCache.emplace(hCursor, CursorGeom());  // remember failure
+    return false;
+}
+
+// Build and cache the D2D bitmap for a cursor handle, rendered at the requested
+// on-screen pixel size (render-thread only). A null bitmap marks a cursor we
+// already tried (and failed) to render.
+static void EnsureCursorBitmap(HCURSOR hCursor, int targetW, int targetH) {
+    if (!hCursor || !render.pDCRenderTarget) return;
+
+    auto it = render.cursorBitmapCache.find(hCursor);
+    if (it != render.cursorBitmapCache.end()) {
+        // Already attempted for this target size (success or failure) — reuse.
+        if (it->second.targetW == targetW && it->second.targetH == targetH)
+            return;
+        // Target changed (e.g. different-DPI monitor) — rebuild.
+        if (it->second.bitmap) it->second.bitmap->Release();
+        it->second = CachedCursorBitmap();
+    } else {
+        it = render.cursorBitmapCache.emplace(hCursor, CachedCursorBitmap()).first;  // mark attempted
+    }
+    it->second.targetW = targetW;
+    it->second.targetH = targetH;
+
+    if (targetW <= 0 || targetH <= 0) return;
+
+    // Render the cursor with GDI (the same path Windows uses) at the exact
+    // on-screen size. DrawIconEx applies the color bitmap AND the mask and
+    // produces correct premultiplied, anti-aliased alpha — reconstructing the
+    // color bitmap alone does not, which made scaled copies look pixelated.
+    BITMAPINFO bmi = { };
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = targetW;
+    bmi.bmiHeader.biHeight = -targetH;   // top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* pBits = nullptr;
+    HBITMAP hDib = CreateDIBSection(NULL, &bmi, DIB_RGB_COLORS, &pBits, NULL, 0);
+    if (!hDib || !pBits) {
+        if (hDib) DeleteObject(hDib);
+        return;
+    }
+
+    HDC hdcMem = CreateCompatibleDC(NULL);
+    if (!hdcMem) { DeleteObject(hDib); return; }
+    HGDIOBJ hOld = SelectObject(hdcMem, hDib);
+    ZeroMemory(pBits, (size_t)targetW * targetH * 4);
+    DrawIconEx(hdcMem, 0, 0, hCursor, targetW, targetH, 0, NULL, DI_NORMAL);
+    SelectObject(hdcMem, hOld);
+    DeleteDC(hdcMem);
+
+    IWICImagingFactory* pWicFactory = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
+                                  IID_PPV_ARGS(&pWicFactory));
+    if (SUCCEEDED(hr) && pWicFactory) {
+        IWICBitmap* pWicBitmap = nullptr;
+        hr = pWicFactory->CreateBitmapFromMemory(
+            (UINT)targetW, (UINT)targetH, GUID_WICPixelFormat32bppPBGRA,
+            (UINT)targetW * 4, (UINT)targetW * (UINT)targetH * 4,
+            (BYTE*)pBits, &pWicBitmap);
+        if (SUCCEEDED(hr) && pWicBitmap) {
+            ID2D1Bitmap* pBitmap = nullptr;
+            hr = render.pDCRenderTarget->CreateBitmapFromWicBitmap(pWicBitmap, nullptr, &pBitmap);
+            if (SUCCEEDED(hr) && pBitmap) {
+                D2D1_SIZE_U px = pBitmap->GetPixelSize();
+                it->second.bitmap = pBitmap;
+                it->second.width = px.width;
+                it->second.height = px.height;
+            }
+            pWicBitmap->Release();
+        }
+        pWicFactory->Release();
+    }
+
+    DeleteObject(hDib);
+}
+
+// Returns the cached (rendered) bitmap entry for a cursor handle, or nullptr.
+static const CachedCursorBitmap* GetCursorBitmap(HCURSOR hCursor) {
+    auto it = render.cursorBitmapCache.find(hCursor);
+    if (it == render.cursorBitmapCache.end() || !it->second.bitmap) return nullptr;
+    return &it->second;
 }
 
 bool IsGameRunning() {
@@ -844,6 +1076,62 @@ void RenderSimpleLineStyle(const std::vector<D2D1_POINT_2F>& smoothed) {
     }
 }
 
+// Render the "Cursor ghost" style: a faded copy of the cursor image at every
+// trail point. Each copy uses the exact cursor bitmap that was on screen when
+// that point was sampled, so an image change (arrow -> I-beam) shows the old
+// image toward the tail and the new one at the head, with a hard boundary.
+void RenderCursorGhostStyle(const std::vector<D2D1_POINT_2F>& smoothed,
+                            const std::vector<HCURSOR>& cursors,
+                            const std::vector<float>& ratios) {
+    if (smoothed.empty()) return;
+    if (!render.pDCRenderTarget) return;
+
+    size_t n = smoothed.size();
+    for (size_t i = 0; i < n; ++i) {
+        HCURSOR h = (i < cursors.size()) ? cursors[i] : NULL;
+
+        CursorGeom g;
+        if (!GetCursorGeom(h, g)) continue;
+
+        // On-screen pixel size for this cursor image (it may be smaller or larger
+        // than the native bitmap, e.g. when the Windows cursor size is changed).
+        int targetW = (int)floorf(g.bmWidth * g.dpiScaleX + 0.5f);
+        int targetH = (int)floorf(g.bmHeight * g.dpiScaleY + 0.5f);
+        if (targetW < 1) targetW = g.bmWidth;
+        if (targetH < 1) targetH = g.bmHeight;
+
+        EnsureCursorBitmap(h, targetW, targetH);
+        const CachedCursorBitmap* cb = GetCursorBitmap(h);
+        if (!cb) continue;
+
+        float ratio = (i < ratios.size()) ? ratios[i] : 0.0f;
+        float alpha = InterpolateOpacity(ratio);
+        if (alpha <= 0.0f) continue;
+
+        // Place the bitmap by its own hotspot so the copy lands exactly where
+        // the cursor image was. Using the sample's own image geometry (rather
+        // than the render thread's current offset) keeps the first copies of a
+        // new cursor image aligned right after an image change.
+        // The cached bitmap is already at the on-screen size, so this is 1:1.
+        float sx = (float)cb->width / (float)g.bmWidth;
+        float sy = (float)cb->height / (float)g.bmHeight;
+        float hx = g.hotspotX * sx;
+        float hy = g.hotspotY * sy;
+
+        // Snap to the pixel grid. The hotspot is often a half-pixel, which
+        // would otherwise make DrawBitmap resample the cursor and blur the copy.
+        float left = floorf(smoothed[i].x - hx + 0.5f);
+        float top  = floorf(smoothed[i].y - hy + 0.5f);
+        D2D1_RECT_F destRect = D2D1::RectF(left, top,
+                                           left + (float)cb->width, top + (float)cb->height);
+        D2D1_RECT_F srcRect = D2D1::RectF(0.0f, 0.0f,
+                                          (FLOAT)cb->width, (FLOAT)cb->height);
+
+        render.pDCRenderTarget->DrawBitmap(cb->bitmap, &destRect, alpha,
+            D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, &srcRect);
+    }
+}
+
 // Releases the brushes and render target owned by the current render target.
 // render.pStrokeStyle is factory-owned, so it survives target recreation.
 static void ReleaseRenderTargetResources() {
@@ -851,7 +1139,32 @@ static void ReleaseRenderTargetResources() {
     if (render.pDebugBrush) { render.pDebugBrush->Release(); render.pDebugBrush = nullptr; }
     if (render.pDebugBrushRed) { render.pDebugBrushRed->Release(); render.pDebugBrushRed = nullptr; }
     if (render.pDebugBrushBlue) { render.pDebugBrushBlue->Release(); render.pDebugBrushBlue = nullptr; }
+    for (auto& kv : render.cursorBitmapCache) {
+        if (kv.second.bitmap) kv.second.bitmap->Release();
+    }
+    render.cursorBitmapCache.clear();
     if (render.pDCRenderTarget) { render.pDCRenderTarget->Release(); render.pDCRenderTarget = nullptr; }
+}
+
+// Drops cached cursor geometry/bitmaps that are neither the live cursor nor
+// referenced by the current frame's trail. Guards against HCURSOR handle reuse
+// after a custom cursor is destroyed.
+static void PruneCursorCaches(const std::vector<HCURSOR>& used) {
+    HCURSOR live = cursor.cachedCursor;
+    auto keep = [&](HCURSOR h) {
+        return h == live || std::find(used.begin(), used.end(), h) != used.end();
+    };
+    for (auto it = cursor.geomCache.begin(); it != cursor.geomCache.end(); ) {
+        if (keep(it->first)) ++it;
+        else it = cursor.geomCache.erase(it);
+    }
+    for (auto it = render.cursorBitmapCache.begin(); it != render.cursorBitmapCache.end(); ) {
+        if (keep(it->first)) { ++it; }
+        else {
+            if (it->second.bitmap) it->second.bitmap->Release();
+            it = render.cursorBitmapCache.erase(it);
+        }
+    }
 }
 
 // Expands a bounding box to include the given rect, or initializes it if unset.
@@ -894,6 +1207,14 @@ DWORD WINAPI PollThreadProc(LPVOID) {
         POINT pt;
         if (!GetCursorPos(&pt)) continue;
 
+        // Snapshot the cursor image so each ghost copy keeps the exact image
+        // that was on screen at sample time.
+        CURSORINFO ci = { sizeof(CURSORINFO) };
+        HCURSOR sampleCursor = NULL;
+        if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor) {
+            sampleCursor = ci.hCursor;
+        }
+
         // Compute the canvas offset (virtual-screen origin).
         int vX = GetSystemMetrics(SM_XVIRTUALSCREEN);
         int vY = GetSystemMetrics(SM_YVIRTUALSCREEN);
@@ -923,20 +1244,30 @@ DWORD WINAPI PollThreadProc(LPVOID) {
                     EvictByTime(now);
                 } else {
                     runtime.isFading = false;
-                    // Distance-based eviction: walk from head (newest)
-                    // backwards, accumulating pixel distance. Pop
-                    // everything past where cumulative > settings.tailSize.
-                    // This makes trail length independent of mouse DPI
-                    // and cursor speed.
-                    double cumulative = 0.0;
-                    for (size_t i = 1; i < runtime.history.size(); ++i) {
-                        double dx = (double)runtime.history[i].pos.x - (double)runtime.history[i-1].pos.x;
-                        double dy = (double)runtime.history[i].pos.y - (double)runtime.history[i-1].pos.y;
-                        cumulative += sqrt(dx * dx + dy * dy);
-                        if (cumulative > settings.tailSize) {
-                            while (runtime.history.size() > i)
-                                runtime.history.pop_back();
-                            break;
+                    if (settings.isGhost) {
+                        // Ghost size_based keeps a fixed copy count. Samples are
+                        // already spaced by ghostSpawnDist at push time, so cap the
+                        // history to settings.tailSize copies; the oldest drops as
+                        // new copies are stamped. When the cursor stops, no new
+                        // copies are pushed, so the existing ones stay put.
+                        while (runtime.history.size() > (size_t)settings.tailSize)
+                            runtime.history.pop_back();
+                    } else {
+                        // Distance-based eviction: walk from head (newest)
+                        // backwards, accumulating pixel distance. Pop
+                        // everything past where cumulative > settings.tailSize.
+                        // This makes trail length independent of mouse DPI
+                        // and cursor speed.
+                        double cumulative = 0.0;
+                        for (size_t i = 1; i < runtime.history.size(); ++i) {
+                            double dx = (double)runtime.history[i].pos.x - (double)runtime.history[i-1].pos.x;
+                            double dy = (double)runtime.history[i].pos.y - (double)runtime.history[i-1].pos.y;
+                            cumulative += sqrt(dx * dx + dy * dy);
+                            if (cumulative > settings.tailSize) {
+                                while (runtime.history.size() > i)
+                                    runtime.history.pop_back();
+                                break;
+                            }
                         }
                     }
                 }
@@ -965,7 +1296,13 @@ DWORD WINAPI PollThreadProc(LPVOID) {
                 origin.initialized = false;
                 origin.lastCursorValid = false;
             }
-            if (settings.trailOriginMode == ORIGIN_IMMEDIATE) {
+            if (settings.isGhost) {
+                // Ghost copies are latched at the raw cursor position; the
+                // renderer anchors each image by its own hotspot, so no trail
+                // origin offset is applied here. This avoids using a stale
+                // offset from the previous cursor image right after a change.
+                originOffset = { 0, 0 };
+            } else if (settings.trailOriginMode == ORIGIN_IMMEDIATE) {
                 std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
                 originOffset = cursor.visualOffset;
             } else if (settings.trailOriginMode == ORIGIN_SMOOTH) {
@@ -1040,19 +1377,30 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             POINT newPt = { pt.x + originOffset.x - vX,
                             pt.y + originOffset.y - vY };
 
-            // === DUPLICATE-SKIP — only blocks push, not eviction ===
+            // === SPAWN / DUPLICATE-SKIP — only blocks push, not eviction ===
             // Eviction has already run above, so it is safe to continue here.
-            if (!runtime.history.empty() &&
-                runtime.history.front().pos.x == newPt.x &&
-                runtime.history.front().pos.y == newPt.y) {
-                // Cursor hasn't moved since last sample — skip push.
-                continue;
+            if (!runtime.history.empty()) {
+                if (settings.isGhost) {
+                    // Ghost copies are latched at their spawn position, so only
+                    // stamp a new copy once the cursor has travelled far enough
+                    // from the last one. This keeps existing copies fixed in
+                    // place instead of sliding with the cursor.
+                    float dx = (float)(newPt.x - runtime.history.front().pos.x);
+                    float dy = (float)(newPt.y - runtime.history.front().pos.y);
+                    if (dx * dx + dy * dy < settings.ghostSpawnDist * settings.ghostSpawnDist)
+                        continue;
+                } else if (runtime.history.front().pos.x == newPt.x &&
+                           runtime.history.front().pos.y == newPt.y) {
+                    // Cursor hasn't moved since last sample — skip push.
+                    continue;
+                }
             }
 
             // === PUSH ===
             Sample s;
             s.pos = newPt;
             s.t = now;
+            s.cursor = sampleCursor;
             runtime.history.push_front(s);
             runtime.lastMovementTime = now;
             runtime.isFading = false;
@@ -1106,18 +1454,17 @@ static void EnsureRenderTarget() {
     }
 }
 
-// Snapshot runtime.history and build spatially-decimated trail points into smoothed.
+// Snapshot runtime.history and build spatially-decimated trail points into
+// smoothed, with a parallel cursor-handle vector (frozen per-copy images).
 static void BuildTrailPoints(const POINT& pt, int vX, int vY,
-                             std::vector<D2D1_POINT_2F>& smoothed) {
-    // Adaptive min distance: smaller kMinDist for longer trails so decimation
-    // keeps enough waypoints. Scales inversely with kMaxPoints, clamped to [2, 6].
+                             std::vector<D2D1_POINT_2F>& smoothed,
+                             std::vector<HCURSOR>& cursors,
+                             std::vector<float>& ratios) {
     size_t kMaxPoints = settings.sizeBased ? (size_t)settings.tailSize : (size_t)settings.tailDuration;
     if (kMaxPoints < 2) kMaxPoints = 2;
-    float kMinDist = 6.0f * (10.0f / (float)kMaxPoints);
-    if (kMinDist < 2.0f) kMinDist = 2.0f;
-    if (kMinDist > 6.0f) kMinDist = 6.0f;
 
     smoothed.reserve(kMaxPoints);
+    cursors.reserve(kMaxPoints);
 
     // The front of the deque is the most recent sample (captured by the poll
     // thread at ~1ms intervals with the cursor-center offset already applied).
@@ -1127,8 +1474,8 @@ static void BuildTrailPoints(const POINT& pt, int vX, int vY,
         // No history yet — fall back to the render thread's cursor position.
         // Read the origin offset under cursor.offsetMutex (nested inside
         // runtime.historyMutex — consistent lock order everywhere).
-        POINT originOffset;
-        {
+        POINT originOffset = { 0, 0 };
+        if (!settings.isGhost) {
             std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
             originOffset = (settings.trailOriginMode == ORIGIN_NONE)
                 ? cursor.frozenCursorOffset
@@ -1139,31 +1486,75 @@ static void BuildTrailPoints(const POINT& pt, int vX, int vY,
         smoothed.push_back(D2D1::Point2F(
             (float)headPt.x + settings.tailOffsetX,
             (float)headPt.y + settings.tailOffsetY));
-    } else {
-        // Point 0: newest poll sample (front of deque).
-        smoothed.push_back(D2D1::Point2F(
-            (float)runtime.history.front().pos.x + settings.tailOffsetX,
-            (float)runtime.history.front().pos.y + settings.tailOffsetY));
+        cursors.push_back(cursor.cachedCursor);
+        if (settings.isGhost) ratios.push_back(0.0f);
+        return;
+    }
 
-        // Spatial decimation: keep only points at least kMinDist pixels apart,
-        // producing evenly-spaced waypoints for consistent Chaikin smoothing.
-        D2D1_POINT_2F prev = smoothed[0];
+    if (settings.isGhost) {
+        // Ghost copies are latched at their spawn position by the poll thread
+        // (spaced by ghostSpawnDist), so draw every history sample directly and
+        // apply no render-time decimation. That keeps each copy fixed in place
+        // instead of sliding along with the moving head.
+        DWORD now = timeGetTime();
+        size_t n = runtime.history.size();
+        ratios.reserve(n);
+        size_t i = 0;
         for (const auto& s : runtime.history) {
-            if (smoothed.size() >= kMaxPoints) break;
-            float sx = (float)s.pos.x + settings.tailOffsetX;
-            float sy = (float)s.pos.y + settings.tailOffsetY;
-            float dx = sx - prev.x;
-            float dy = sy - prev.y;
-            if (dx * dx + dy * dy >= kMinDist * kMinDist) {
-                smoothed.push_back(D2D1::Point2F(sx, sy));
-                prev = smoothed.back();
+            smoothed.push_back(D2D1::Point2F(
+                (float)s.pos.x + settings.tailOffsetX,
+                (float)s.pos.y + settings.tailOffsetY));
+            cursors.push_back(s.cursor);
+
+            float ratio;
+            if (settings.sizeBased) {
+                // Fixed copy count: fade head -> tail by list position.
+                ratio = (n > 1) ? (float)i / (float)(n - 1) : 0.0f;
+            } else {
+                // Time based: fade by age so copies disappear in place.
+                DWORD age = now - s.t;
+                ratio = (float)age / (float)settings.tailDuration;
+                if (ratio > 1.0f) ratio = 1.0f;
             }
+            ratios.push_back(ratio);
+            ++i;
+        }
+        return;
+    }
+
+    // Adaptive min distance: smaller kMinDist for longer trails so decimation
+    // keeps enough waypoints. Scales inversely with kMaxPoints, clamped to [2, 6].
+    float kMinDist = 6.0f * (10.0f / (float)kMaxPoints);
+    if (kMinDist < 2.0f) kMinDist = 2.0f;
+    if (kMinDist > 6.0f) kMinDist = 6.0f;
+
+    // Point 0: newest poll sample (front of deque).
+    smoothed.push_back(D2D1::Point2F(
+        (float)runtime.history.front().pos.x + settings.tailOffsetX,
+        (float)runtime.history.front().pos.y + settings.tailOffsetY));
+    cursors.push_back(runtime.history.front().cursor);
+
+    // Spatial decimation: keep only points at least kMinDist pixels apart,
+    // producing evenly-spaced waypoints for consistent Chaikin smoothing.
+    D2D1_POINT_2F prev = smoothed[0];
+    for (const auto& s : runtime.history) {
+        if (smoothed.size() >= kMaxPoints) break;
+        float sx = (float)s.pos.x + settings.tailOffsetX;
+        float sy = (float)s.pos.y + settings.tailOffsetY;
+        float dx = sx - prev.x;
+        float dy = sy - prev.y;
+        if (dx * dx + dy * dy >= kMinDist * kMinDist) {
+            smoothed.push_back(D2D1::Point2F(sx, sy));
+            cursors.push_back(s.cursor);
+            prev = smoothed.back();
         }
     }
 }
 
 // Chaikin subdivision: smooths corners by inserting intermediate points,
-// roughly doubling count per iteration (2 iterations).
+// roughly doubling count per iteration (2 iterations). Used by the Simple line
+// style; the ghost style stamps the decimated points directly so its copy count
+// matches the configured size.
 static void ChaikinSmooth(std::vector<D2D1_POINT_2F>& smoothed) {
     for (int iter = 0; iter < 2; ++iter) {
         if (smoothed.size() < 3) break;
@@ -1181,8 +1572,9 @@ static void ChaikinSmooth(std::vector<D2D1_POINT_2F>& smoothed) {
     }
 }
 
-// Computes the trail's bounding box, expanded for stroke width / anti-aliasing.
-static void ComputeTrailBBox(const std::vector<D2D1_POINT_2F>& smoothed, RECT& bbox) {
+// Computes the trail's bounding box, expanded for stroke width / cursor size.
+static void ComputeTrailBBox(const std::vector<D2D1_POINT_2F>& smoothed,
+                             const std::vector<HCURSOR>& cursors, RECT& bbox) {
     float minX = smoothed[0].x, maxX = smoothed[0].x;
     float minY = smoothed[0].y, maxY = smoothed[0].y;
     for (const auto& p : smoothed) {
@@ -1193,7 +1585,20 @@ static void ComputeTrailBBox(const std::vector<D2D1_POINT_2F>& smoothed, RECT& b
     }
 
     int margin = 32;
-    if (!settings.simpleLineWidths.empty()) {
+    if (settings.isGhost) {
+        // Expand by the largest on-screen cursor image in the trail.
+        float maxDim = 0.0f;
+        for (HCURSOR h : cursors) {
+            CursorGeom g;
+            if (!GetCursorGeom(h, g)) continue;
+            float w = g.bmWidth * g.dpiScaleX;
+            float hgt = g.bmHeight * g.dpiScaleY;
+            if (w > maxDim) maxDim = w;
+            if (hgt > maxDim) maxDim = hgt;
+        }
+        if (maxDim < 1.0f) maxDim = 64.0f;
+        margin = (int)maxDim + 16;
+    } else if (!settings.simpleLineWidths.empty()) {
         float maxW = settings.simpleLineWidths[0];
         for (float w : settings.simpleLineWidths) {
             if (w > maxW) maxW = w;
@@ -1207,9 +1612,13 @@ static void ComputeTrailBBox(const std::vector<D2D1_POINT_2F>& smoothed, RECT& b
 }
 
 // Dispatches to the active style renderer and updates the clear flag.
-static void RenderTrail(const std::vector<D2D1_POINT_2F>& smoothed) {
+static void RenderTrail(const std::vector<D2D1_POINT_2F>& smoothed,
+                        const std::vector<HCURSOR>& cursors,
+                        const std::vector<float>& ratios) {
     if (smoothed.size() >= 2) {
-        if (settings.activeStyle == L"simple_line") {
+        if (settings.isGhost) {
+            RenderCursorGhostStyle(smoothed, cursors, ratios);
+        } else {
             RenderSimpleLineStyle(smoothed);
         }
         // Future styles: add else-if branches here, e.g.
@@ -1418,21 +1827,38 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
                 ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE
                 : D2D1_ANTIALIAS_MODE_ALIASED);
 
+            // Cache the live cursor's bitmap while it is still valid, so older
+            // copies keep their exact image after the cursor changes.
+            if (settings.isGhost && cursor.cachedCursor) {
+                int tw = (int)floorf(cursor.bmWidth * cursor.dpiScaleX + 0.5f);
+                int th = (int)floorf(cursor.bmHeight * cursor.dpiScaleY + 0.5f);
+                EnsureCursorBitmap(cursor.cachedCursor, tw, th);
+            }
+
             std::vector<D2D1_POINT_2F> smoothed;
-            BuildTrailPoints(pt, vX, vY, smoothed);
+            std::vector<HCURSOR> cursors;
+            std::vector<float> ratios;
+            BuildTrailPoints(pt, vX, vY, smoothed, cursors, ratios);
 
             if (smoothed.size() >= 2) {
-                ChaikinSmooth(smoothed);
-                ComputeTrailBBox(smoothed, curBBox);
+                // Ghost stamps the decimated points directly so the copy count
+                // matches the configured size; the line style smooths corners.
+                if (!settings.isGhost) {
+                    ChaikinSmooth(smoothed);
+                }
+                ComputeTrailBBox(smoothed, cursors, curBBox);
                 hasCurBBox = true;
             }
-            RenderTrail(smoothed);
+            RenderTrail(smoothed, cursors, ratios);
 
             DrawDebug(pt, vX, vY, smoothed, curBBox, hasCurBBox);
 
             HRESULT hr = render.pDCRenderTarget->EndDraw();
             if (hr == D2DERR_RECREATE_TARGET) {
                 ReleaseRenderTargetResources();
+            }
+            if (settings.isGhost) {
+                PruneCursorCaches(cursors);
             }
         }
 
