@@ -148,6 +148,9 @@ Draws a trail behind the mouse cursor that follows its movement.
     - tail_size: 20
       $name: Copies
       $description: Number of cursor copies in the trail (Size based mode). Minimum 2.
+    - timeout: 2000
+      $name: Timeout
+      $description: Milliseconds of inactivity before the trail starts fading (using the Time based tail duration). 0 = trail always visible.
     $name: Size based
   - spacing: 10
     $name: Copy spacing
@@ -230,7 +233,7 @@ struct Settings {
     float colorBlendHalf = 0.0f;
     std::vector<float> colorBandStart;                // precomputed pure-band boundaries
     std::vector<float> colorBandEnd;
-    std::vector<float> simpleLineOpacityValues;       // parsed opacity alphas (0.0-1.0)
+    std::vector<float> opacityValues;                 // parsed opacity alphas (0.0-1.0), shared by both styles
 };
 
 // Per-cursor geometry, cached per HCURSOR so the ghost style can place copies
@@ -322,6 +325,8 @@ struct Runtime {
     MMRESULT mmTimerId = 0;
 
     DWORD lastMovementTime = 0;               // poll-thread-owned
+    POINT lastCursorPos = { 0, 0 };           // previous raw cursor position (movement tracking)
+    bool  lastCursorValid = false;
     bool  isFading = false;
 
     RECT  prevDirtyRect = { 0, 0, 0, 0 };     // render-thread-only frame state
@@ -416,6 +421,38 @@ static void ParseFloatList(const wchar_t* key, const std::wstring& defaultToken,
     }
 }
 
+// Trail point/copy budget for the active style: the tail size in size_based
+// mode, the tail duration otherwise. Always at least 2.
+static size_t TrailPointBudget() {
+    size_t n = settings.sizeBased ? (size_t)settings.tailSize : (size_t)settings.tailDuration;
+    return (n < 2) ? 2 : n;
+}
+
+// Auto spacing between trail points for a given budget: smaller for longer
+// trails, clamped to [2, 6] px. Shared by the line decimation and the ghost
+// spawn distance.
+static float AutoPointSpacing(size_t kMaxPoints) {
+    if (kMaxPoints < 2) kMaxPoints = 2;
+    float d = 6.0f * (10.0f / (float)kMaxPoints);
+    if (d < 2.0f) d = 2.0f;
+    if (d > 6.0f) d = 6.0f;
+    return d;
+}
+
+// Reads the settings shared by both styles (trail mode, tail duration/size,
+// timeout, opacity) from the style's settings prefix ("ghostOptions" or
+// "simpleLineOptions"). The two styles keep independent values.
+static void LoadCommonTrailSettings(const wchar_t* prefix) {
+    auto key = [prefix](const wchar_t* suffix) { return std::wstring(prefix) + L"." + suffix; };
+    settings.sizeBased    = ReadStringSetting(key(L"trail_mode").c_str(), L"time_based") == L"size_based";
+    settings.tailDuration = Wh_GetIntSetting(key(L"timeBased.tail_duration").c_str());
+    settings.tailSize     = Wh_GetIntSetting(key(L"sizeBased.tail_size").c_str());
+    settings.sizeTimeout  = Wh_GetIntSetting(key(L"sizeBased.timeout").c_str());
+
+    ParseFloatList(key(L"opacity.values").c_str(), L"100", 0.0f, 100.0f, 100.0f, settings.opacityValues);
+    for (float& v : settings.opacityValues) v /= 100.0f;
+}
+
 void LoadSettings() {
     settings.tailOffsetX = Wh_GetIntSetting(L"tail_offset.x");
     settings.tailOffsetY = Wh_GetIntSetting(L"tail_offset.y");
@@ -432,38 +469,22 @@ void LoadSettings() {
 
     if (settings.isGhost) {
         // Cursor ghost has its own trail options. sizeBased.tail_size is the
-        // number of cursor copies (not pixels); tailDuration still drives the
-        // fade when the cursor is hidden.
-        settings.sizeBased = ReadStringSetting(L"ghostOptions.trail_mode", L"time_based") == L"size_based";
-        settings.tailDuration = Wh_GetIntSetting(L"ghostOptions.timeBased.tail_duration");
-        settings.tailSize = Wh_GetIntSetting(L"ghostOptions.sizeBased.tail_size");
+        // number of cursor copies (not pixels); tailDuration drives the fade.
+        LoadCommonTrailSettings(L"ghostOptions");
+
         settings.ghostSpacing = Wh_GetIntSetting(L"ghostOptions.spacing");
         if (settings.ghostSpacing < 0) settings.ghostSpacing = 0;
         if (settings.ghostSpacing > 200) settings.ghostSpacing = 200;
-        settings.sizeTimeout = 0;
         settings.antialiasing = true;                  // ghost always uses linear bitmap interpolation
         settings.trailOriginMode = ORIGIN_IMMEDIATE;   // unused by ghost (samples store the raw hotspot)
 
         // Distance the cursor must travel before a new ghost copy is stamped.
         // Ghosts are latched at their spawn position, so this controls the gap
-        // between copies (same auto-gap formula the line decimation used).
-        {
-            size_t kMaxPoints = settings.sizeBased ? (size_t)settings.tailSize
-                                                   : (size_t)settings.tailDuration;
-            if (kMaxPoints < 2) kMaxPoints = 2;
-            float d = 6.0f * (10.0f / (float)kMaxPoints);
-            if (d < 2.0f) d = 2.0f;
-            if (d > 6.0f) d = 6.0f;
-            d += (float)settings.ghostSpacing;
-            if (d < 1.0f) d = 1.0f;
-            settings.ghostSpawnDist = d;
-        }
-
-        ParseFloatList(L"ghostOptions.opacity.values", L"100", 0.0f, 100.0f, 100.0f, settings.simpleLineOpacityValues);
-        for (float& v : settings.simpleLineOpacityValues) v /= 100.0f;
+        // between copies (same auto-gap formula the line decimation uses).
+        settings.ghostSpawnDist = AutoPointSpacing(TrailPointBudget()) + (float)settings.ghostSpacing;
+        if (settings.ghostSpawnDist < 1.0f) settings.ghostSpawnDist = 1.0f;
     } else {
-        // Trail mode
-        settings.sizeBased = ReadStringSetting(L"simpleLineOptions.trail_mode", L"time_based") == L"size_based";
+        LoadCommonTrailSettings(L"simpleLineOptions");
 
         settings.antialiasing = ReadStringSetting(L"simpleLineOptions.antialiasing", L"true") != L"false";
 
@@ -474,10 +495,6 @@ void LoadSettings() {
             settings.trailOriginOnCursorChange = L"smooth";
         }
 
-        settings.tailDuration = Wh_GetIntSetting(L"simpleLineOptions.timeBased.tail_duration");
-        settings.tailSize = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.tail_size");
-        settings.sizeTimeout = Wh_GetIntSetting(L"simpleLineOptions.sizeBased.timeout");
-
         // Re-anchor the trail origin on cursor image changes.
         if (settings.trailOriginOnCursorChange == L"immediate") {
             settings.trailOriginMode = ORIGIN_IMMEDIATE;
@@ -486,10 +503,6 @@ void LoadSettings() {
         } else {
             settings.trailOriginMode = ORIGIN_NONE;
         }
-
-        // Parse opacity values (percentages 0-100), then convert to 0-1 alphas.
-        ParseFloatList(L"simpleLineOptions.opacity.values", L"100", 0.0f, 100.0f, 100.0f, settings.simpleLineOpacityValues);
-        for (float& v : settings.simpleLineOpacityValues) v /= 100.0f;
     }
 
     if (settings.tailDuration < 20) settings.tailDuration = 20;
@@ -1032,7 +1045,7 @@ static float InterpolateWidth(const std::vector<float>& values,
 }
 
 static float InterpolateOpacity(float ratio) {
-    float alpha = InterpolateWidth(settings.simpleLineOpacityValues, ratio);
+    float alpha = InterpolateWidth(settings.opacityValues, ratio);
     if (alpha < 0.0f) alpha = 0.0f;
     if (alpha > 1.0f) alpha = 1.0f;
     return alpha;
@@ -1227,6 +1240,17 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             // even when the cursor is stationary (duplicate-skip would otherwise
             // continue before reaching eviction, freezing the trail).
             DWORD now = timeGetTime();
+
+            // Track raw cursor movement so the size-based timeout resets on any
+            // motion (for both styles), independent of how often samples are
+            // pushed. Must run before the eviction below so it sees the update.
+            if (runtime.lastCursorValid &&
+                (pt.x != runtime.lastCursorPos.x || pt.y != runtime.lastCursorPos.y)) {
+                runtime.lastMovementTime = now;
+            }
+            runtime.lastCursorPos = pt;
+            runtime.lastCursorValid = true;
+
             if (settings.sizeBased) {
                 if ((settings.sizeTimeout > 0 && runtime.lastMovementTime > 0 &&
                      now - runtime.lastMovementTime > settings.sizeTimeout) ||
@@ -1460,8 +1484,7 @@ static void BuildTrailPoints(const POINT& pt, int vX, int vY,
                              std::vector<D2D1_POINT_2F>& smoothed,
                              std::vector<HCURSOR>& cursors,
                              std::vector<float>& ratios) {
-    size_t kMaxPoints = settings.sizeBased ? (size_t)settings.tailSize : (size_t)settings.tailDuration;
-    if (kMaxPoints < 2) kMaxPoints = 2;
+    size_t kMaxPoints = TrailPointBudget();
 
     smoothed.reserve(kMaxPoints);
     cursors.reserve(kMaxPoints);
@@ -1522,11 +1545,9 @@ static void BuildTrailPoints(const POINT& pt, int vX, int vY,
         return;
     }
 
-    // Adaptive min distance: smaller kMinDist for longer trails so decimation
-    // keeps enough waypoints. Scales inversely with kMaxPoints, clamped to [2, 6].
-    float kMinDist = 6.0f * (10.0f / (float)kMaxPoints);
-    if (kMinDist < 2.0f) kMinDist = 2.0f;
-    if (kMinDist > 6.0f) kMinDist = 6.0f;
+    // Adaptive min distance: smaller for longer trails so decimation keeps
+    // enough waypoints. Shared formula with the ghost spawn distance.
+    float kMinDist = AutoPointSpacing(kMaxPoints);
 
     // Point 0: newest poll sample (front of deque).
     smoothed.push_back(D2D1::Point2F(

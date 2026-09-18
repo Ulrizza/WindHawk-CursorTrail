@@ -3,3 +3,4 @@
 - After any code change, consider whether the README and description need updating.
 - When the user says "bump" or "bump version", increment the version number and update CHANGELOG.md.
 - Never touch or modify any BKP (backup) files.
+- Never try to compile or build the project; the toolchain is not set up on this machine.

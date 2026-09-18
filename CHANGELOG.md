@@ -4,6 +4,8 @@
 - Fixed Cursor ghost copies sliding along with the cursor. Copies are now latched at the screen position where they are spawned (a new copy is stamped once the cursor travels the configured spacing) and only fade/expire in place.
 - Ghost time-based opacity now fades by age; size-based copies keep a fixed count that stays put when the cursor stops.
 - Fixed the first ghost copies after a cursor image change (e.g. arrow to I-beam) being misaligned: ghost samples now store the raw cursor hotspot and each copy is anchored by its own image's hotspot, instead of using a trail-origin offset that lagged behind the image change.
+- Added a Timeout setting to Cursor ghost size-based mode (`ghostOptions.sizeBased.timeout`, default 2000) that fades the copies after inactivity, matching the simple line timeout. Any cursor movement resets it.
+- Refactored settings loading: both styles now read their shared trail settings (trail mode, tail duration/size, timeout, opacity) through `LoadCommonTrailSettings(prefix)`, and the point-count/spacing formulas are shared helpers (`TrailPointBudget`, `AutoPointSpacing`). Renamed `Settings::simpleLineOpacityValues` to `opacityValues` since both styles use it.
 
 ## 0.13
 - Removed the Cursor ghost style implementation; the `cursor_ghost` setting is retained but renders nothing (reserved for a future rework). Debug outline dimensions now come from `UpdateCursorCenterOffset`.

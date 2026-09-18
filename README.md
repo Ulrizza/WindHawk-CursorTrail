@@ -56,7 +56,7 @@ Single translation unit (`CursorTrail.cpp`). All state is file-scope, grouped in
 
 ### Settings & interpolation
 
-- `LoadSettings` uses `ReadStringSetting`, `ParseFloatList`, `SplitAndTrim`, and `ParseHexColor`, and precomputes color band boundaries (`settings.colorBandStart`/`colorBandEnd`) and opacity alphas (`settings.simpleLineOpacityValues`, stored as 0–1) so the hot path does no parsing or per-frame allocation.
+- `LoadSettings` uses `ReadStringSetting`, `ParseFloatList`, `SplitAndTrim`, and `ParseHexColor`, and precomputes color band boundaries (`settings.colorBandStart`/`colorBandEnd`) and opacity alphas (`settings.opacityValues`, stored as 0–1) so the hot path does no parsing or per-frame allocation. `LoadCommonTrailSettings(prefix)` reads the settings shared by both styles (trail mode, tail duration/size, timeout, opacity) from `ghostOptions` or `simpleLineOptions`; `TrailPointBudget`/`AutoPointSpacing` hold the shared point-count and spacing formulas.
 - `GetBlendedColor`, `InterpolateWidth`, and `InterpolateOpacity` are allocation-free; `Ease` centralizes the easing curves (`linear`/`smoothstep`/`ease_in`/`ease_out`).
 
 ### Cursor geometry
@@ -89,6 +89,7 @@ Single translation unit (`CursorTrail.cpp`). All state is file-scope, grouped in
 | `ghostOptions.trail_mode` | `time_based` (default) or `size_based` — how the copies expire |
 | `ghostOptions.timeBased.tail_duration` | Milliseconds each cursor copy stays visible (min 20) |
 | `ghostOptions.sizeBased.tail_size` | Number of cursor copies in the trail, size-based mode (min 2) |
+| `ghostOptions.sizeBased.timeout` | Milliseconds of inactivity before the copies fade using the Time based tail duration (0 = disabled) |
 | `ghostOptions.spacing` | Extra distance in pixels added between cursor copies. A new copy is stamped each time the cursor travels this gap (0 = automatic). |
 | `ghostOptions.opacity.values` | Comma-separated opacity percentages (0-100) from head to tail, each gets equal share |
 | `waveform.type` | Wave pattern applied to the trail: `none`, `sinus`, `square`, or `triangle` |
