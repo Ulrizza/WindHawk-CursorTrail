@@ -57,7 +57,7 @@ Single translation unit (`CursorTrail.cpp`). All state is file-scope, grouped in
 ### Settings & interpolation
 
 - `LoadSettings` uses `ReadStringSetting`, `ParseFloatList`, `SplitAndTrim`, and `ParseHexColor`, and precomputes color band boundaries (`settings.colorBandStart`/`colorBandEnd`) and opacity alphas (`settings.opacityValues`, stored as 0–1) so the hot path does no parsing or per-frame allocation. `LoadCommonTrailSettings(prefix)` reads the settings shared by both styles (trail mode, tail duration/size, timeout, opacity) from `ghostOptions` or `simpleLineOptions`; `TrailPointBudget`/`AutoPointSpacing` hold the shared point-count and spacing formulas.
-- `GetBlendedColor`, `InterpolateWidth`, and `InterpolateOpacity` are allocation-free; `Ease` centralizes the easing curves (`linear`/`smoothstep`/`ease_in`/`ease_out`).
+- `GetBlendedColor`, `InterpolateValues`, and `InterpolateOpacity` are allocation-free; `Ease` centralizes the easing curves (`linear`/`smoothstep`/`ease_in`/`ease_out`).
 
 ### Cursor geometry
 
@@ -91,6 +91,7 @@ Single translation unit (`CursorTrail.cpp`). All state is file-scope, grouped in
 | `ghostOptions.sizeBased.tail_size` | Number of cursor copies in the trail, size-based mode (min 2) |
 | `ghostOptions.sizeBased.timeout` | Milliseconds of inactivity before the copies fade using the Time based tail duration (0 = disabled) |
 | `ghostOptions.spacing` | Extra distance in pixels added between cursor copies. A new copy is stamped each time the cursor travels this gap (0 = automatic). |
+| `ghostOptions.size.values` | Comma-separated size multipliers from head to tail (1 = same size, 0.8 = 80%, 2 = twice). Each value gets an equal share; repeat to widen. Avoid values above 1 (upscaled copies look pixelated); use the Windows cursor size setting to enlarge the cursor |
 | `ghostOptions.opacity.values` | Comma-separated opacity percentages (0-100) from head to tail, each gets equal share |
 | `waveform.type` | Wave pattern applied to the trail: `none`, `sinus`, `square`, or `triangle` |
 | `waveform.amplitude` | Maximum pixel offset applied by the waveform (0 = disabled) |

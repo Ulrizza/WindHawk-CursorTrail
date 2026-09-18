@@ -2,7 +2,7 @@
 // @id              cursor-trail
 // @name            Cursor trail
 // @description     Cursor trail overlay with configurable styles (simple line, cursor ghost)
-// @version         0.13
+// @version         0.14
 // @author          Ulrizza
 // @license         MIT
 // @include         windhawk.exe
@@ -53,6 +53,9 @@ Draws a trail behind the mouse cursor that follows its movement.
   *Smoothstep*, *Ease in*, *Ease out*).
 - **Opacity** — comma-separated opacity percentages (0–100) from head to
   tail, e.g. `100,0` to fade out.
+- **Size** (Cursor ghost) — comma-separated size multipliers from head to
+  tail, e.g. `1,0.5,1,0.5` for a pulsing trail. `1` = same size, `2` =
+  twice, `0.8` = 80%.
 - **Antialiasing** — smooth or hard trail edges.
 
 ## Fine-tuning
@@ -140,7 +143,7 @@ Draws a trail behind the mouse cursor that follows its movement.
     - time_based: Time based
     - size_based: Size based
   - timeBased:
-    - tail_duration: 300
+    - tail_duration: 500
       $name: Tail duration
       $description: How long each cursor copy stays visible, in milliseconds. Minimum 20.
     $name: Time based
@@ -155,6 +158,11 @@ Draws a trail behind the mouse cursor that follows its movement.
   - spacing: 10
     $name: Copy spacing
     $description: Extra distance in pixels added between cursor copies (0 = automatic, speed-adaptive).
+  - size:
+    - values: "1,0"
+      $name: Values
+      $description: "Comma-separated size multipliers from head to tail (1 = same size, 0.8 = 80%%, 2 = twice). Each value gets an equal share; repeat to widen (e.g. \"1,0.5,1,0.5\"). Avoid values above 1 (upscaled copies look pixelated); use the Windows cursor size setting to enlarge the cursor."
+    $name: Size
   - opacity:
     - values: "100,20"
       $name: Values
@@ -221,6 +229,8 @@ struct Settings {
     bool  isGhost = false;                            // active style is cursor_ghost
     int   ghostSpacing = 0;                           // extra px between ghost copies
     float ghostSpawnDist = 2.0f;                      // px cursor must travel before a new ghost is stamped
+    std::vector<float> ghostSizes;                    // per-copy size multipliers, head → tail
+    float ghostSizeMax = 1.0f;                        // largest size multiplier (min 1), for the bbox
 
     std::wstring    activeStyle = L"simple_line";
     std::wstring    trailOriginOnCursorChange = L"smooth";
@@ -483,6 +493,13 @@ void LoadSettings() {
         // between copies (same auto-gap formula the line decimation uses).
         settings.ghostSpawnDist = AutoPointSpacing(TrailPointBudget()) + (float)settings.ghostSpacing;
         if (settings.ghostSpawnDist < 1.0f) settings.ghostSpawnDist = 1.0f;
+
+        // Per-copy size multipliers (head → tail), applied like the line width.
+        ParseFloatList(L"ghostOptions.size.values", L"1", 0.05f, 10.0f, 1.0f, settings.ghostSizes);
+        settings.ghostSizeMax = 1.0f;
+        for (float s : settings.ghostSizes) {
+            if (s > settings.ghostSizeMax) settings.ghostSizeMax = s;
+        }
     } else {
         LoadCommonTrailSettings(L"simpleLineOptions");
 
@@ -1027,7 +1044,7 @@ static void GetBlendedColor(float ratio, float& r, float& g, float& b) {
 // Interpolates a single float value across equal shares, using smoothstep
 // (same as the color blend easing). Stops are evenly spaced, so the index and
 // fraction are computed directly without building a position array.
-static float InterpolateWidth(const std::vector<float>& values,
+static float InterpolateValues(const std::vector<float>& values,
                               float ratio) {
     if (values.empty()) return 1.0f;
     if (values.size() == 1) return values[0];
@@ -1045,7 +1062,7 @@ static float InterpolateWidth(const std::vector<float>& values,
 }
 
 static float InterpolateOpacity(float ratio) {
-    float alpha = InterpolateWidth(settings.opacityValues, ratio);
+    float alpha = InterpolateValues(settings.opacityValues, ratio);
     if (alpha < 0.0f) alpha = 0.0f;
     if (alpha > 1.0f) alpha = 1.0f;
     return alpha;
@@ -1077,7 +1094,7 @@ void RenderSimpleLineStyle(const std::vector<D2D1_POINT_2F>& smoothed) {
     for (size_t i = 0; i < segCount; ++i) {
         float ratio = (segCount > 1) ? (float)i / (float)(segCount - 1) : 0.0f;
         float alpha = InterpolateOpacity(ratio);
-        float strokeWidth = InterpolateWidth(settings.simpleLineWidths, ratio);
+        float strokeWidth = InterpolateValues(settings.simpleLineWidths, ratio);
         if (strokeWidth < 0.5f) strokeWidth = 0.5f;
 
         float gr, gg, gb;
@@ -1121,27 +1138,37 @@ void RenderCursorGhostStyle(const std::vector<D2D1_POINT_2F>& smoothed,
         float alpha = InterpolateOpacity(ratio);
         if (alpha <= 0.0f) continue;
 
+        // Per-copy size multiplier, interpolated like the line width.
+        float scale = InterpolateValues(settings.ghostSizes, ratio);
+        if (scale <= 0.0f) continue;
+        float drawW = (float)cb->width * scale;
+        float drawH = (float)cb->height * scale;
+
         // Place the bitmap by its own hotspot so the copy lands exactly where
         // the cursor image was. Using the sample's own image geometry (rather
         // than the render thread's current offset) keeps the first copies of a
-        // new cursor image aligned right after an image change.
-        // The cached bitmap is already at the on-screen size, so this is 1:1.
+        // new cursor image aligned right after an image change. The hotspot is
+        // scaled too, so resizing does not move the copy.
         float sx = (float)cb->width / (float)g.bmWidth;
         float sy = (float)cb->height / (float)g.bmHeight;
-        float hx = g.hotspotX * sx;
-        float hy = g.hotspotY * sy;
+        float hx = g.hotspotX * sx * scale;
+        float hy = g.hotspotY * sy * scale;
 
         // Snap to the pixel grid. The hotspot is often a half-pixel, which
         // would otherwise make DrawBitmap resample the cursor and blur the copy.
         float left = floorf(smoothed[i].x - hx + 0.5f);
         float top  = floorf(smoothed[i].y - hy + 0.5f);
-        D2D1_RECT_F destRect = D2D1::RectF(left, top,
-                                           left + (float)cb->width, top + (float)cb->height);
+        D2D1_RECT_F destRect = D2D1::RectF(left, top, left + drawW, top + drawH);
         D2D1_RECT_F srcRect = D2D1::RectF(0.0f, 0.0f,
                                           (FLOAT)cb->width, (FLOAT)cb->height);
 
-        render.pDCRenderTarget->DrawBitmap(cb->bitmap, &destRect, alpha,
-            D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, &srcRect);
+        // Nearest neighbor keeps 1:1 copies crisp; linear avoids blocky edges
+        // when a copy is scaled.
+        D2D1_BITMAP_INTERPOLATION_MODE interp =
+            (fabsf(scale - 1.0f) < 0.001f)
+                ? D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR
+                : D2D1_BITMAP_INTERPOLATION_MODE_LINEAR;
+        render.pDCRenderTarget->DrawBitmap(cb->bitmap, &destRect, alpha, interp, &srcRect);
     }
 }
 
@@ -1618,6 +1645,7 @@ static void ComputeTrailBBox(const std::vector<D2D1_POINT_2F>& smoothed,
             if (hgt > maxDim) maxDim = hgt;
         }
         if (maxDim < 1.0f) maxDim = 64.0f;
+        maxDim *= settings.ghostSizeMax;
         margin = (int)maxDim + 16;
     } else if (!settings.simpleLineWidths.empty()) {
         float maxW = settings.simpleLineWidths[0];
