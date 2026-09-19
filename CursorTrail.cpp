@@ -2,7 +2,7 @@
 // @id              cursor-trail
 // @name            Cursor trail
 // @description     Cursor trail overlay with configurable styles (simple line, cursor ghost). Optional companion mod draws it above the taskbar and Start menu.
-// @version         0.14
+// @version         0.15
 // @author          Ulrizza
 // @license         MIT
 // @include         windhawk.exe
@@ -52,7 +52,12 @@ both (it needs a one-time Win-key press).
   for a tapered trail, or `10,1,10,1` for a pulsing one. Repeat a value to
   give it a bigger share (`2,2,2,2,1` = 80% at 2, 20% at 1).
 - **Color** — a single hex color (`RRGGBB`) or a comma-separated list for a
-  gradient from head to tail (e.g. `000000,FF0000,FFFFFF`).
+  gradient from head to tail (e.g. `000000,FF0000,FFFFFF`). For Cursor
+  ghost, leave empty to keep the cursor's own colors. Otherwise pixels
+  selected by **Replace → Mode** are recolored to the Color value: *Auto*
+  uses the cursor's enclosed center color (ignoring the outline), *Custom*
+  uses the Custom color (e.g. `000000` to recolor a black cursor body), and
+  *Whole* recolors every non-transparent pixel.
 - **Blend width** — how much each color transition blends: `0` for hard
   bands, `100` for a full gradient.
 - **Interpolation** — curve used to blend between colors (*Linear*,
@@ -174,6 +179,34 @@ both (it needs a one-time Win-key press).
       $name: Values
       $description: Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade). Each value gets an equal share; repeat to widen.
     $name: Opacity
+  - color:
+    - values: ""
+      $name: Values
+      $description: "Leave empty to keep the cursor's own colors. Otherwise a single hex (RRGGBB without #) or comma-separated list for a gradient from head to tail; pixels matching the Replace color are recolored to this value (FFFFFF makes white copies). Each color gets an equal share; repeat to widen. Invalid entries are skipped."
+    - blend_width: 100
+      $name: Blend width
+      $description: Percentage of each transition spent blending (0 = pure bands, 100 = full gradient).
+    - interpolation: "smoothstep"
+      $name: Interpolation
+      $description: Easing curve used to blend between colors
+      $options:
+      - linear: Linear
+      - smoothstep: Smoothstep
+      - ease_in: Ease in
+      - ease_out: Ease out
+    - replace:
+      - mode: "auto"
+        $name: Mode
+        $description: "Which cursor pixels to recolor: Auto uses the cursor's enclosed center color (ignoring the outline/contour; falls back to the largest area when nothing is enclosed), Custom uses the Custom color below, and Whole recolors every non-transparent pixel."
+        $options:
+        - auto: Auto (dominant color)
+        - custom: Custom
+        - whole: Whole cursor
+      - custom: "FFFFFF"
+        $name: Custom color
+        $description: "Original cursor color to replace with the Values color (used when Mode is Custom). Set 000000 to recolor a black cursor body, or FFFFFF to recolor a white outline."
+      $name: Replace
+    $name: Color
   $name: Cursor ghost options
 - tail_offset:
   - x: 0
@@ -221,7 +254,32 @@ enum TrailOriginMode { ORIGIN_NONE, ORIGIN_IMMEDIATE, ORIGIN_SMOOTH };
 // Easing curves used for color blending and interpolation.
 enum ColorInterpolation { INTERP_LINEAR, INTERP_SMOOTHSTEP, INTERP_EASE_IN, INTERP_EASE_OUT };
 
+// Number of tint samples baked across the ghost color gradient. A flat color
+// needs only one; otherwise the continuous gradient is quantized to this many
+// steps (higher = smoother, more bitmaps per cursor image).
+static const int kGhostTintSteps = 64;
+
+// Recoloring splits each pixel between two reference colors (the color to
+// replace and the color to keep): a pixel is swapped when it is closer to the
+// replace color. kGhostSplitSoftness is the RGB-distance band around the
+// midpoint over which the swap ramps, so anti-aliased transitions blend.
+static const float kGhostSplitSoftness = 0.2f;
+
+// Dominant-color detection: pixels at least this opaque are grouped into
+// connected regions, and neighboring pixels whose straight color is within this
+// distance of the seed join the region. The two largest regions' colors are
+// used as the reference colors for recoloring.
+static const BYTE  kGhostRegionMinAlpha = 128;
+static const float kGhostRegionTol = 0.2f;
+
+// Bumped by LoadSettings whenever parsed settings change, so the render thread
+// can invalidate caches (e.g. tinted cursor bitmaps) without comparing values.
+static std::atomic<unsigned> g_settingsVersion{0};
+
 struct Rgb { float r, g, b; };
+
+// How ghost copies choose which cursor pixels to recolor.
+enum GhostReplaceMode { GHOST_REPLACE_AUTO, GHOST_REPLACE_CUSTOM, GHOST_REPLACE_WHOLE };
 
 // Parsed settings, written by LoadSettings and read by all threads.
 struct Settings {
@@ -237,13 +295,17 @@ struct Settings {
     float ghostSpawnDist = 2.0f;                      // px cursor must travel before a new ghost is stamped
     std::vector<float> ghostSizes;                    // per-copy size multipliers, head → tail
     float ghostSizeMax = 1.0f;                        // largest size multiplier (min 1), for the bbox
+    bool  ghostTintActive = false;                    // ghost color list is non-empty (recolor copies)
+    std::vector<Rgb> ghostTints;                      // precomputed tint per baked variant (head → tail)
+    GhostReplaceMode ghostReplaceMode = GHOST_REPLACE_AUTO;  // which pixels to recolor
+    Rgb   ghostReplaceColor = { 1.0f, 1.0f, 1.0f };   // Custom: original cursor color to swap for the tint
 
     std::wstring    activeStyle = L"simple_line";
     std::wstring    trailOriginOnCursorChange = L"smooth";
     TrailOriginMode trailOriginMode = ORIGIN_SMOOTH;
 
     std::vector<float> simpleLineWidths;              // parsed width values, one per stop
-    std::vector<Rgb>   simpleLineColorsRGB;           // pre-parsed for hot-path use
+    std::vector<Rgb>   activeColorsRGB;               // pre-parsed colors of the active style
     int   colorBlendWidth = 0;
     ColorInterpolation colorInterp = INTERP_SMOOTHSTEP;
     float colorBlendHalf = 0.0f;
@@ -306,6 +368,15 @@ struct CachedCursorBitmap {
     int  targetW = 0, targetH = 0; // requested on-screen size, for invalidation
 };
 
+// All tinted variants of one cursor image. The ghost color gradient is sampled
+// at kGhostTintSteps ratios (0 = head, 1 = tail) and baked into a bitmap per
+// sample; a flat color yields a single variant.
+struct CachedCursorVariants {
+    int  targetW = 0, targetH = 0;               // requested on-screen size
+    unsigned colorVersion = 0;                   // settings version the tints were built from
+    std::vector<CachedCursorBitmap> variants;    // one per sampled tint
+};
+
 struct RenderResources {
     ID2D1Factory*         pD2DFactory = nullptr;
     ID2D1DCRenderTarget*  pDCRenderTarget = nullptr;
@@ -318,7 +389,7 @@ struct RenderResources {
 
     // Cursor ghost style: per-HCURSOR D2D bitmaps, built lazily when a new
     // cursor image appears and released with the render target.
-    std::unordered_map<HCURSOR, CachedCursorBitmap> cursorBitmapCache;
+    std::unordered_map<HCURSOR, CachedCursorVariants> cursorBitmapCache;
 
     HDC     hdcMem = NULL;                  // cached backbuffer
     HBITMAP hBitmap = NULL;
@@ -469,6 +540,70 @@ static void LoadCommonTrailSettings(const wchar_t* prefix) {
     for (float& v : settings.opacityValues) v /= 100.0f;
 }
 
+// Interpolates the active style's color gradient at the given ratio (defined
+// after LoadSettings; forward-declared so the tint samples can be precomputed).
+static void GetBlendedColor(float ratio, float& r, float& g, float& b);
+
+// Parses the color settings (values, blend width, interpolation) for a style
+// prefix into settings.activeColorsRGB and precomputes the pure-band
+// boundaries used by GetBlendedColor. The two styles keep independent values.
+// Returns false when the values list is empty and defaultColor is null, meaning
+// "no color set" (the caller keeps the original appearance). A non-null
+// defaultColor is substituted for an empty list.
+static bool LoadColorSettings(const wchar_t* prefix, const wchar_t* defaultColor) {
+    auto key = [prefix](const wchar_t* suffix) { return std::wstring(prefix) + L"." + suffix; };
+
+    settings.activeColorsRGB.clear();
+    settings.colorBandStart.clear();
+    settings.colorBandEnd.clear();
+    {
+        std::wstring raw = ReadStringSetting(key(L"color.values").c_str(), L"");
+        std::vector<std::wstring> colorTokens = raw.empty()
+            ? std::vector<std::wstring>() : SplitAndTrim(raw);
+        if (colorTokens.empty()) {
+            if (!defaultColor) {
+                settings.colorBlendHalf = 0.0f;
+                return false;
+            }
+            colorTokens.push_back(defaultColor);
+        }
+        for (const auto& hex : colorTokens) {
+            Rgb rgb;
+            if (!ParseHexColor(hex, rgb.r, rgb.g, rgb.b)) {
+                rgb = { 0, 0, 0 };
+            }
+            settings.activeColorsRGB.push_back(rgb);
+        }
+    }
+
+    settings.colorBlendWidth = Wh_GetIntSetting(key(L"color.blend_width").c_str());
+    if (settings.colorBlendWidth < 0) settings.colorBlendWidth = 0;
+    if (settings.colorBlendWidth > 100) settings.colorBlendWidth = 100;
+
+    std::wstring interp = ReadStringSetting(key(L"color.interpolation").c_str(), L"smoothstep");
+    if (interp == L"ease_in")      settings.colorInterp = INTERP_EASE_IN;
+    else if (interp == L"ease_out") settings.colorInterp = INTERP_EASE_OUT;
+    else if (interp == L"smoothstep") settings.colorInterp = INTERP_SMOOTHSTEP;
+    else                            settings.colorInterp = INTERP_LINEAR;
+
+    // Precompute pure-band boundaries for GetBlendedColor.
+    settings.colorBlendHalf = (settings.colorBlendWidth / 100.0f) / 2.0f;
+    settings.colorBandStart.clear();
+    settings.colorBandEnd.clear();
+    {
+        size_t N = settings.activeColorsRGB.size();
+        settings.colorBandStart.reserve(N);
+        settings.colorBandEnd.reserve(N);
+        for (size_t i = 0; i < N; ++i) {
+            float start = (i == 0) ? 0.0f : (float)i / (float)N + settings.colorBlendHalf;
+            float end = (i == N - 1) ? 1.0f : (float)(i + 1) / (float)N - settings.colorBlendHalf;
+            settings.colorBandStart.push_back(start);
+            settings.colorBandEnd.push_back(end);
+        }
+    }
+    return true;
+}
+
 void LoadSettings() {
     settings.tailOffsetX = Wh_GetIntSetting(L"tail_offset.x");
     settings.tailOffsetY = Wh_GetIntSetting(L"tail_offset.y");
@@ -506,8 +641,43 @@ void LoadSettings() {
         for (float s : settings.ghostSizes) {
             if (s > settings.ghostSizeMax) settings.ghostSizeMax = s;
         }
+
+        // Per-copy recolor gradient. Empty values mean "keep the cursor's own
+        // colors"; any non-empty list recolors the copies (FFFFFF makes white).
+        bool ghostHasColor = LoadColorSettings(L"ghostOptions", nullptr);
+        settings.ghostTintActive = ghostHasColor;
+        settings.ghostTints.clear();
+        if (ghostHasColor) {
+            // Precompute the tint for each baked bitmap variant (ratio 0 = head,
+            // 1 = tail) so EnsureCursorBitmap does no per-frame sampling.
+            settings.ghostTints.resize((size_t)kGhostTintSteps);
+            for (int i = 0; i < kGhostTintSteps; ++i) {
+                float ratio = (float)i / (float)(kGhostTintSteps - 1);
+                GetBlendedColor(ratio, settings.ghostTints[i].r,
+                                settings.ghostTints[i].g, settings.ghostTints[i].b);
+            }
+        }
+
+        // Which pixels the tint replaces: Auto uses the cursor's dominant color
+        // (largest connected region), Custom uses the custom color below, and
+        // Whole recolors every non-transparent pixel.
+        std::wstring replaceMode = ReadStringSetting(L"ghostOptions.color.replace.mode", L"auto");
+        if (replaceMode == L"custom")     settings.ghostReplaceMode = GHOST_REPLACE_CUSTOM;
+        else if (replaceMode == L"whole") settings.ghostReplaceMode = GHOST_REPLACE_WHOLE;
+        else                              settings.ghostReplaceMode = GHOST_REPLACE_AUTO;
+
+        settings.ghostReplaceColor = { 1.0f, 1.0f, 1.0f };
+        {
+            std::wstring replaceHex = ReadStringSetting(L"ghostOptions.color.replace.custom", L"FFFFFF");
+            Rgb rgb;
+            if (ParseHexColor(replaceHex, rgb.r, rgb.g, rgb.b)) {
+                settings.ghostReplaceColor = rgb;
+            }
+        }
     } else {
         LoadCommonTrailSettings(L"simpleLineOptions");
+        LoadColorSettings(L"simpleLineOptions", L"000000");
+        settings.ghostTints.clear();
 
         settings.antialiasing = ReadStringSetting(L"simpleLineOptions.antialiasing", L"true") != L"false";
 
@@ -541,48 +711,8 @@ void LoadSettings() {
     // Parse width values (min 1, no upper clamp)
     ParseFloatList(L"simpleLineOptions.width.values", L"1", 1.0f, 1e30f, 1.0f, settings.simpleLineWidths);
 
-    // Parse color values
-    settings.simpleLineColorsRGB.clear();
-    {
-        std::wstring colorSetting = ReadStringSetting(L"simpleLineOptions.color.values", L"000000");
-        std::vector<std::wstring> colorTokens = SplitAndTrim(colorSetting);
-        if (colorTokens.empty()) {
-            colorTokens.push_back(L"000000");
-        }
-        for (const auto& hex : colorTokens) {
-            Rgb rgb;
-            if (!ParseHexColor(hex, rgb.r, rgb.g, rgb.b)) {
-                rgb = { 0, 0, 0 };
-            }
-            settings.simpleLineColorsRGB.push_back(rgb);
-        }
-    }
-
-    settings.colorBlendWidth = Wh_GetIntSetting(L"simpleLineOptions.color.blend_width");
-    if (settings.colorBlendWidth < 0) settings.colorBlendWidth = 0;
-    if (settings.colorBlendWidth > 100) settings.colorBlendWidth = 100;
-
-    std::wstring interp = ReadStringSetting(L"simpleLineOptions.color.interpolation", L"smoothstep");
-    if (interp == L"ease_in")      settings.colorInterp = INTERP_EASE_IN;
-    else if (interp == L"ease_out") settings.colorInterp = INTERP_EASE_OUT;
-    else if (interp == L"smoothstep") settings.colorInterp = INTERP_SMOOTHSTEP;
-    else                            settings.colorInterp = INTERP_LINEAR;
-
-    // Precompute pure-band boundaries for GetBlendedColor.
-    settings.colorBlendHalf = (settings.colorBlendWidth / 100.0f) / 2.0f;
-    settings.colorBandStart.clear();
-    settings.colorBandEnd.clear();
-    {
-        size_t N = settings.simpleLineColorsRGB.size();
-        settings.colorBandStart.reserve(N);
-        settings.colorBandEnd.reserve(N);
-        for (size_t i = 0; i < N; ++i) {
-            float start = (i == 0) ? 0.0f : (float)i / (float)N + settings.colorBlendHalf;
-            float end = (i == N - 1) ? 1.0f : (float)(i + 1) / (float)N - settings.colorBlendHalf;
-            settings.colorBandStart.push_back(start);
-            settings.colorBandEnd.push_back(end);
-        }
-    }
+    // Signal the render thread that caches derived from settings are stale.
+    g_settingsVersion.fetch_add(1, std::memory_order_relaxed);
 }
 
 static void FreeIconInfoBitmaps(ICONINFO& ii) {
@@ -827,25 +957,160 @@ static bool GetCursorGeom(HCURSOR hCursor, CursorGeom& out) {
     return false;
 }
 
-// Build and cache the D2D bitmap for a cursor handle, rendered at the requested
-// on-screen pixel size (render-thread only). A null bitmap marks a cursor we
-// already tried (and failed) to render.
+// Euclidean RGB distance between a straight color and a reference color.
+static float RgbDistance(float r, float g, float b, const Rgb& c) {
+    float dr = r - c.r, dg = g - c.g, db = b - c.b;
+    return sqrtf(dr * dr + dg * dg + db * db);
+}
+
+// Result of AnalyzeCursorColors: the cursor's significant colors.
+struct CursorColorAnalysis {
+    Rgb  dominant = { 1.0f, 1.0f, 1.0f };  // largest region overall (by area)
+    Rgb  runnerUp = { 1.0f, 1.0f, 1.0f };  // second largest region overall
+    Rgb  interior = { 1.0f, 1.0f, 1.0f };  // largest region that never touches transparency
+    Rgb  boundary = { 1.0f, 1.0f, 1.0f };  // largest region that touches transparency
+    bool hasInterior = false;
+    bool hasBoundary = false;
+};
+
+// Analyzes the cursor's colors by grouping sufficiently opaque pixels into
+// connected regions (neighbors join when their straight color is close to the
+// region's seed color). Regions are classified by whether they touch the
+// transparent background: the enclosed "interior" is the cursor's center/fill,
+// while a "boundary" region is part of the contour/outline. Used to pick the
+// ghost recolor references.
+static CursorColorAnalysis AnalyzeCursorColors(const BYTE* src, int w, int h) {
+    CursorColorAnalysis result;
+    size_t n = (size_t)w * h;
+    std::vector<BYTE> alpha(n);
+    std::vector<float> sr(n), sg(n), sb(n);
+    for (size_t i = 0; i < n; ++i) {
+        const BYTE* s = src + i * 4;
+        BYTE a = s[3];
+        alpha[i] = a;
+        if (a == 0) { sr[i] = sg[i] = sb[i] = 0.0f; continue; }
+        float inv = 1.0f / (float)a;
+        float cr = s[2] * inv, cg = s[1] * inv, cb = s[0] * inv;  // straight
+        sr[i] = (cr > 1.0f) ? 1.0f : cr;
+        sg[i] = (cg > 1.0f) ? 1.0f : cg;
+        sb[i] = (cb > 1.0f) ? 1.0f : cb;
+    }
+
+    std::vector<int> label(n, -1);
+    std::vector<int> queue;
+    size_t bestCount = 0, secondCount = 0;
+    size_t bestInteriorCount = 0, bestBoundaryCount = 0;
+    Rgb best = { 1.0f, 1.0f, 1.0f };
+    Rgb second = { 1.0f, 1.0f, 1.0f };
+
+    for (size_t start = 0; start < n; ++start) {
+        if (label[start] >= 0 || alpha[start] < kGhostRegionMinAlpha) continue;
+
+        const float tr = sr[start], tg = sg[start], tb = sb[start];
+        queue.clear();
+        queue.push_back((int)start);
+        label[start] = (int)start;
+
+        size_t count = 0;
+        bool touchesOutside = false;
+        double sumR = 0.0, sumG = 0.0, sumB = 0.0;
+        for (size_t qi = 0; qi < queue.size(); ++qi) {
+            int idx = queue[qi];
+            int x = idx % w, y = idx / w;
+            ++count;
+            sumR += sr[idx]; sumG += sg[idx]; sumB += sb[idx];
+
+            // 4-connected region growth.
+            const int nb[4][2] = { { x - 1, y }, { x + 1, y }, { x, y - 1 }, { x, y + 1 } };
+            for (int k = 0; k < 4; ++k) {
+                int nx = nb[k][0], ny = nb[k][1];
+                if (nx < 0 || ny < 0 || nx >= w || ny >= h) { touchesOutside = true; continue; }
+                int ni = ny * w + nx;
+                if (alpha[ni] < kGhostRegionMinAlpha) { touchesOutside = true; continue; }
+                if (label[ni] >= 0) continue;
+                float dr = sr[ni] - tr, dg = sg[ni] - tg, db = sb[ni] - tb;
+                if (dr * dr + dg * dg + db * db > kGhostRegionTol * kGhostRegionTol) continue;
+                label[ni] = (int)start;
+                queue.push_back(ni);
+            }
+
+            // 8-neighbor transparency contact, so diagonal edges count as contour.
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    if (dx == 0 && dy == 0) continue;
+                    int nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h ||
+                        alpha[ny * w + nx] < kGhostRegionMinAlpha) {
+                        touchesOutside = true;
+                    }
+                }
+            }
+        }
+
+        Rgb avg = { (float)(sumR / (double)count),
+                    (float)(sumG / (double)count),
+                    (float)(sumB / (double)count) };
+        if (count > bestCount) {
+            secondCount = bestCount; second = best;
+            bestCount = count; best = avg;
+        } else if (count > secondCount) {
+            secondCount = count; second = avg;
+        }
+
+        if (touchesOutside) {
+            if (count > bestBoundaryCount) {
+                bestBoundaryCount = count;
+                result.boundary = avg;
+                result.hasBoundary = true;
+            }
+        } else if (count > bestInteriorCount) {
+            bestInteriorCount = count;
+            result.interior = avg;
+            result.hasInterior = true;
+        }
+    }
+    result.dominant = best;
+    result.runnerUp = (secondCount > 0) ? second : best;
+    return result;
+}
+
+// Build and cache the recolored D2D bitmaps for a cursor handle, rendered at
+// the requested on-screen pixel size (render-thread only). The precomputed
+// ghost gradient samples (settings.ghostTints) are each baked into their own
+// bitmap; an empty color list yields a single untinted variant. The pixels to
+// swap are chosen by AnalyzeCursorColors: Auto prefers the enclosed center
+// (falling back to the largest region), Custom uses settings.ghostReplaceColor,
+// and Whole swaps every non-transparent pixel. The entry is rebuilt when the
+// target size or the settings version changes; a failed build leaves the entry
+// with null bitmaps so it is not retried.
 static void EnsureCursorBitmap(HCURSOR hCursor, int targetW, int targetH) {
     if (!hCursor || !render.pDCRenderTarget) return;
 
+    unsigned version = g_settingsVersion.load(std::memory_order_relaxed);
     auto it = render.cursorBitmapCache.find(hCursor);
     if (it != render.cursorBitmapCache.end()) {
-        // Already attempted for this target size (success or failure) — reuse.
-        if (it->second.targetW == targetW && it->second.targetH == targetH)
-            return;
-        // Target changed (e.g. different-DPI monitor) — rebuild.
-        if (it->second.bitmap) it->second.bitmap->Release();
-        it->second = CachedCursorBitmap();
+        CachedCursorVariants& c = it->second;
+        if (c.targetW == targetW && c.targetH == targetH && c.colorVersion == version)
+            return;  // already built for this size and color
+        for (auto& v : c.variants) {
+            if (v.bitmap) v.bitmap->Release();
+        }
+        it->second = CachedCursorVariants();
     } else {
-        it = render.cursorBitmapCache.emplace(hCursor, CachedCursorBitmap()).first;  // mark attempted
+        it = render.cursorBitmapCache.emplace(hCursor, CachedCursorVariants()).first;
     }
-    it->second.targetW = targetW;
-    it->second.targetH = targetH;
+
+    CachedCursorVariants& entry = it->second;
+    entry.targetW = targetW;
+    entry.targetH = targetH;
+    entry.colorVersion = version;
+
+    // When recoloring is off, keep a single untinted copy of the cursor image;
+    // otherwise bake one bitmap per sampled tint.
+    bool tinting = settings.ghostTintActive && !settings.ghostTints.empty();
+    const std::vector<Rgb>& tints = settings.ghostTints;
+    size_t variantCount = tinting ? tints.size() : 1;
+    entry.variants.resize(variantCount);
 
     if (targetW <= 0 || targetH <= 0) return;
 
@@ -880,21 +1145,114 @@ static void EnsureCursorBitmap(HCURSOR hCursor, int targetW, int targetH) {
     HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
                                   IID_PPV_ARGS(&pWicFactory));
     if (SUCCEEDED(hr) && pWicFactory) {
-        IWICBitmap* pWicBitmap = nullptr;
-        hr = pWicFactory->CreateBitmapFromMemory(
-            (UINT)targetW, (UINT)targetH, GUID_WICPixelFormat32bppPBGRA,
-            (UINT)targetW * 4, (UINT)targetW * (UINT)targetH * 4,
-            (BYTE*)pBits, &pWicBitmap);
-        if (SUCCEEDED(hr) && pWicBitmap) {
-            ID2D1Bitmap* pBitmap = nullptr;
-            hr = render.pDCRenderTarget->CreateBitmapFromWicBitmap(pWicBitmap, nullptr, &pBitmap);
-            if (SUCCEEDED(hr) && pBitmap) {
-                D2D1_SIZE_U px = pBitmap->GetPixelSize();
-                it->second.bitmap = pBitmap;
-                it->second.width = px.width;
-                it->second.height = px.height;
+        size_t pixelBytes = (size_t)targetW * targetH * 4;
+        size_t pixelCount = (size_t)targetW * targetH;
+
+        // Per-pixel recolor weight, computed once (independent of the per-copy
+        // tint): 1 = swap to the tint, 0 = keep the original color. Whole mode
+        // swaps every non-transparent pixel. Otherwise a pixel is swapped when
+        // it is closer to the "replace" color (A) than to the "keep" color (B),
+        // with a softness band around the midpoint so anti-aliased transitions
+        // blend. Straight channels are clamped to [0,1] so matching also works
+        // for straight-alpha cursor data.
+        std::vector<float> weight;
+        if (tinting) {
+            weight.assign(pixelCount, 0.0f);
+            const BYTE* src = (const BYTE*)pBits;
+
+            if (settings.ghostReplaceMode == GHOST_REPLACE_WHOLE) {
+                for (size_t i = 0; i < pixelCount; ++i) {
+                    if (src[i * 4 + 3] != 0) weight[i] = 1.0f;
+                }
+            } else {
+                CursorColorAnalysis ca = AnalyzeCursorColors(src, targetW, targetH);
+
+                Rgb replaceColor, keepColor;
+                if (settings.ghostReplaceMode == GHOST_REPLACE_AUTO) {
+                    // Prefer the enclosed center over the contour. If every
+                    // region touches the background, fall back to the largest.
+                    if (ca.hasInterior) {
+                        replaceColor = ca.interior;
+                        keepColor = ca.hasBoundary ? ca.boundary : ca.runnerUp;
+                    } else {
+                        replaceColor = ca.dominant;
+                        keepColor = ca.runnerUp;
+                    }
+                } else {
+                    replaceColor = settings.ghostReplaceColor;
+                    // Keep whichever region color is farthest from the replace color.
+                    keepColor = (RgbDistance(replaceColor.r, replaceColor.g, replaceColor.b, ca.dominant)
+                                 >= RgbDistance(replaceColor.r, replaceColor.g, replaceColor.b, ca.runnerUp))
+                        ? ca.dominant : ca.runnerUp;
+                }
+
+                float refDist = RgbDistance(replaceColor.r, replaceColor.g, replaceColor.b, keepColor);
+                bool twoColor = refDist > 0.05f;
+                // Keep the softness band below half the reference distance so a
+                // pure replace-color pixel always reaches a full swap.
+                float softness = kGhostSplitSoftness;
+                if (softness > refDist * 0.5f) softness = refDist * 0.5f;
+                if (softness < 0.01f) softness = 0.01f;
+                for (size_t i = 0; i < pixelCount; ++i) {
+                    const BYTE* s = src + i * 4;
+                    BYTE a = s[3];
+                    if (a == 0) continue;
+                    if (!twoColor) { weight[i] = 1.0f; continue; }
+                    float inv = 1.0f / (float)a;
+                    float sr = s[2] * inv, sg = s[1] * inv, sb = s[0] * inv;  // straight
+                    if (sr > 1.0f) sr = 1.0f;
+                    if (sg > 1.0f) sg = 1.0f;
+                    if (sb > 1.0f) sb = 1.0f;
+                    float dA = RgbDistance(sr, sg, sb, replaceColor);
+                    float dB = RgbDistance(sr, sg, sb, keepColor);
+                    float w = 0.5f + (dB - dA) / (2.0f * softness);
+                    if (w < 0.0f) w = 0.0f;
+                    if (w > 1.0f) w = 1.0f;
+                    weight[i] = w;
+                }
             }
-            pWicBitmap->Release();
+        }
+
+        std::vector<BYTE> scratch(pixelBytes);
+        for (size_t vi = 0; vi < variantCount; ++vi) {
+            const BYTE* src = (const BYTE*)pBits;
+            BYTE* dst = scratch.data();
+            if (!tinting) {
+                memcpy(dst, src, pixelBytes);  // keep the cursor's own colors
+            } else {
+                // Replace the matched pixels with the tint. Interpolating in
+                // premultiplied space avoids unpremultiplying per variant:
+                // out = src + (tint*alpha - src) * weight.
+                const Rgb& tint = tints[vi];
+                const float tb = tint.b, tg = tint.g, tr = tint.r;
+                for (size_t i = 0; i < pixelCount; ++i) {
+                    const BYTE* s = src + i * 4;
+                    BYTE* d = dst + i * 4;
+                    float w = weight[i];
+                    BYTE a = s[3];
+                    d[0] = (BYTE)(s[0] + (tb * a - s[0]) * w + 0.5f);
+                    d[1] = (BYTE)(s[1] + (tg * a - s[1]) * w + 0.5f);
+                    d[2] = (BYTE)(s[2] + (tr * a - s[2]) * w + 0.5f);
+                    d[3] = a;
+                }
+            }
+
+            IWICBitmap* pWicBitmap = nullptr;
+            hr = pWicFactory->CreateBitmapFromMemory(
+                (UINT)targetW, (UINT)targetH, GUID_WICPixelFormat32bppPBGRA,
+                (UINT)targetW * 4, (UINT)pixelBytes,
+                scratch.data(), &pWicBitmap);
+            if (SUCCEEDED(hr) && pWicBitmap) {
+                ID2D1Bitmap* pBitmap = nullptr;
+                hr = render.pDCRenderTarget->CreateBitmapFromWicBitmap(pWicBitmap, nullptr, &pBitmap);
+                if (SUCCEEDED(hr) && pBitmap) {
+                    D2D1_SIZE_U px = pBitmap->GetPixelSize();
+                    entry.variants[vi].bitmap = pBitmap;
+                    entry.variants[vi].width = px.width;
+                    entry.variants[vi].height = px.height;
+                }
+                pWicBitmap->Release();
+            }
         }
         pWicFactory->Release();
     }
@@ -902,11 +1260,18 @@ static void EnsureCursorBitmap(HCURSOR hCursor, int targetW, int targetH) {
     DeleteObject(hDib);
 }
 
-// Returns the cached (rendered) bitmap entry for a cursor handle, or nullptr.
-static const CachedCursorBitmap* GetCursorBitmap(HCURSOR hCursor) {
+// Returns the cached tinted bitmap for a cursor handle at the given trail ratio
+// (0 = head, 1 = tail), or nullptr. The ratio selects the nearest baked variant.
+static const CachedCursorBitmap* GetCursorBitmap(HCURSOR hCursor, float ratio) {
     auto it = render.cursorBitmapCache.find(hCursor);
-    if (it == render.cursorBitmapCache.end() || !it->second.bitmap) return nullptr;
-    return &it->second;
+    if (it == render.cursorBitmapCache.end()) return nullptr;
+    const CachedCursorVariants& c = it->second;
+    if (c.variants.empty()) return nullptr;
+    size_t n = c.variants.size();
+    size_t idx = (n > 1) ? (size_t)floorf(ratio * (float)(n - 1) + 0.5f) : 0;
+    if (idx > n - 1) idx = n - 1;
+    if (!c.variants[idx].bitmap) return nullptr;
+    return &c.variants[idx];
 }
 
 bool IsGameRunning() {
@@ -981,7 +1346,7 @@ static LONG RoundToLong(float v) {
 // zones overlap, merging into a multi-color gradient. Reads the precomputed
 // band boundaries from LoadSettings.
 static void GetBlendedColor(float ratio, float& r, float& g, float& b) {
-    const std::vector<Rgb>& colors = settings.simpleLineColorsRGB;
+    const std::vector<Rgb>& colors = settings.activeColorsRGB;
     r = 0.0f; g = 0.0f; b = 0.0f;
     if (colors.empty()) return;
     if (colors.size() == 1) {
@@ -1136,11 +1501,12 @@ void RenderCursorGhostStyle(const std::vector<D2D1_POINT_2F>& smoothed,
         if (targetW < 1) targetW = g.bmWidth;
         if (targetH < 1) targetH = g.bmHeight;
 
+        float ratio = (i < ratios.size()) ? ratios[i] : 0.0f;
+
         EnsureCursorBitmap(h, targetW, targetH);
-        const CachedCursorBitmap* cb = GetCursorBitmap(h);
+        const CachedCursorBitmap* cb = GetCursorBitmap(h, ratio);
         if (!cb) continue;
 
-        float ratio = (i < ratios.size()) ? ratios[i] : 0.0f;
         float alpha = InterpolateOpacity(ratio);
         if (alpha <= 0.0f) continue;
 
@@ -1186,7 +1552,9 @@ static void ReleaseRenderTargetResources() {
     if (render.pDebugBrushRed) { render.pDebugBrushRed->Release(); render.pDebugBrushRed = nullptr; }
     if (render.pDebugBrushBlue) { render.pDebugBrushBlue->Release(); render.pDebugBrushBlue = nullptr; }
     for (auto& kv : render.cursorBitmapCache) {
-        if (kv.second.bitmap) kv.second.bitmap->Release();
+        for (auto& v : kv.second.variants) {
+            if (v.bitmap) v.bitmap->Release();
+        }
     }
     render.cursorBitmapCache.clear();
     if (render.pDCRenderTarget) { render.pDCRenderTarget->Release(); render.pDCRenderTarget = nullptr; }
@@ -1207,7 +1575,9 @@ static void PruneCursorCaches(const std::vector<HCURSOR>& used) {
     for (auto it = render.cursorBitmapCache.begin(); it != render.cursorBitmapCache.end(); ) {
         if (keep(it->first)) { ++it; }
         else {
-            if (it->second.bitmap) it->second.bitmap->Release();
+            for (auto& v : it->second.variants) {
+                if (v.bitmap) v.bitmap->Release();
+            }
             it = render.cursorBitmapCache.erase(it);
         }
     }

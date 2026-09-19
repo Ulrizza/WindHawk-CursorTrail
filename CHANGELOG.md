@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15
+- Added a Color setting to Cursor ghost (`ghostOptions.color.values`, `blend_width`, `interpolation`): a single hex color or a comma-separated list for a head-to-tail gradient. Empty (the default) keeps the cursor's own colors.
+- Added a Replace subgroup (`ghostOptions.color.replace`) with a `mode` selector and a `custom` color. `auto` (default) recolors the cursor's enclosed center color, ignoring the outline/contour (`AnalyzeCursorColors`; falls back to the largest region when nothing is enclosed); `custom` recolors the `custom` color (default `FFFFFF`; set `000000` to recolor a black cursor body); `whole` recolors every non-transparent pixel.
+- Recoloring splits each pixel between the replace color and a keep color (the largest boundary/outline region, or the region farthest from the replace color) with a soft midpoint band, so anti-aliased edges no longer leave a halo of the original color.
+- Colors are parsed via the shared `LoadColorSettings(prefix, defaultColor)` helper into `settings.activeColorsRGB` (empty means "no color" when `defaultColor` is null), and `EnsureCursorBitmap` bakes the sampled gradient into per-cursor bitmap variants selected by `GetCursorBitmap(hCursor, ratio)`.
+
 ## Cursor trail helper - always on top 1.0
 - Added the **Cursor trail helper - always on top** companion mod (`CursorTrailBand.cpp`, mod id `cursor-trail-helper-always-on-top`). It runs inside `explorer.exe` and moves the overlay into `ZBID_SYSTEM_TOOLS` via the undocumented `SetWindowBand` API, so the trail draws above the Windows 11 taskbar and Start menu. When direct banding is denied it captures the IAM access key by hooking `NtUserEnableIAMAccess` (unhooked once captured), and re-applies the band if it is reset or the overlay is recreated.
 
