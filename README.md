@@ -51,7 +51,7 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 3. `ChaikinSmooth` (Simple line only) — two-pass corner smoothing; the ghost style draws its latched copies directly so its copy count matches the setting.
 4. `ComputeTrailBBox` — trail bounding box plus stroke-width (line) or cursor-size (ghost) margin.
 5. `RenderTrail` — dispatch to the active style renderer (`RenderSimpleLineStyle` or `RenderCursorGhostStyle`).
-6. `DrawDebug` — optional white/red outline boxes plus a blue trail-start marker.
+6. `DrawDebug` — optional white/red outline boxes plus a green trail-start marker.
 7. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
 8. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
 
@@ -102,7 +102,7 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 | `waveform.type` | Wave pattern applied to the trail: `none`, `sinus`, `square`, or `triangle` |
 | `waveform.amplitude` | Maximum pixel offset applied by the waveform (0 = disabled) |
 | `waveform.period` | Milliseconds per full wave cycle (lower = faster wobble) |
-| `debug.show_outline` | `False` (default) — draw white (bitmap bounds) and red (visible pixels) outline boxes around the cursor, plus a blue `+` at the trail start |
+| `debug.show_outline` | `False` (default) — draw white (bitmap bounds) and red (visible pixels) outline boxes around the cursor, plus a green `+` at the trail start |
 
 ## Above the taskbar (companion mod)
 

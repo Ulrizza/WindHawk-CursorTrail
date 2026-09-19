@@ -2,7 +2,7 @@
 // @id              cursor-trail
 // @name            Cursor trail
 // @description     Cursor trail overlay with configurable styles (simple line, cursor ghost). Optional companion mod draws it above the taskbar and Start menu.
-// @version         0.15
+// @version         0.16
 // @author          Ulrizza
 // @license         MIT
 // @include         windhawk.exe
@@ -40,12 +40,6 @@ Draws a trail behind the mouse cursor that follows its movement.
 - The trail fades out when the cursor is hidden (e.g. while typing), and
   rendering pauses over fullscreen games.
 
-## Above the taskbar and Start menu
-
-On Windows 11 the trail is drawn under the taskbar and Start menu. Install
-the companion **Cursor trail helper - always on top** mod to lift it above
-both (it needs a one-time Win-key press).
-
 ## Appearance
 
 - **Width** — comma-separated stroke widths from head to tail, e.g. `2,1`
@@ -75,6 +69,12 @@ both (it needs a one-time Win-key press).
   centered on the cursor by default.
 - **Debug: Show outline** — overlay boxes on the detected cursor and trail
   start to check alignment.
+
+## Above the taskbar and Start menu
+
+On Windows 11 the trail is drawn under the taskbar and Start menu. Install
+the companion **Cursor trail helper - always on top** mod to lift it above
+both (it needs a one-time Win-key press).
 */
 // ==/WindhawkModReadme==
 
@@ -219,7 +219,7 @@ both (it needs a one-time Win-key press).
 - debug:
   - show_outline: false
     $name: Show outline
-    $description: Draw a white box around the detected cursor bitmap, a red box around its visible (alpha-trimmed) pixels, and a blue + at the trail start, to verify the trail origin and cursor size.
+    $description: Draw a white box around the detected cursor bitmap, a red box around its visible (alpha-trimmed) pixels, and a green + at the trail start, to verify the trail origin and cursor size.
   $name: Debug
 */
 // ==/WindhawkModSettings==
@@ -382,10 +382,10 @@ struct RenderResources {
     ID2D1DCRenderTarget*  pDCRenderTarget = nullptr;
     ID2D1SolidColorBrush* pSimpleLineBrush = nullptr;
     ID2D1StrokeStyle*     pStrokeStyle = nullptr;
-    // DEBUG brushes (temporary): white = bitmap bounds, red = visible pixels, blue = trail start.
+    // DEBUG brushes (temporary): white = bitmap bounds, red = visible pixels, green = trail start.
     ID2D1SolidColorBrush* pDebugBrush = nullptr;
     ID2D1SolidColorBrush* pDebugBrushRed = nullptr;
-    ID2D1SolidColorBrush* pDebugBrushBlue = nullptr;
+    ID2D1SolidColorBrush* pDebugBrushGreen = nullptr;
 
     // Cursor ghost style: per-HCURSOR D2D bitmaps, built lazily when a new
     // cursor image appears and released with the render target.
@@ -1550,7 +1550,7 @@ static void ReleaseRenderTargetResources() {
     if (render.pSimpleLineBrush) { render.pSimpleLineBrush->Release(); render.pSimpleLineBrush = nullptr; }
     if (render.pDebugBrush) { render.pDebugBrush->Release(); render.pDebugBrush = nullptr; }
     if (render.pDebugBrushRed) { render.pDebugBrushRed->Release(); render.pDebugBrushRed = nullptr; }
-    if (render.pDebugBrushBlue) { render.pDebugBrushBlue->Release(); render.pDebugBrushBlue = nullptr; }
+    if (render.pDebugBrushGreen) { render.pDebugBrushGreen->Release(); render.pDebugBrushGreen = nullptr; }
     for (auto& kv : render.cursorBitmapCache) {
         for (auto& v : kv.second.variants) {
             if (v.bitmap) v.bitmap->Release();
@@ -1876,7 +1876,7 @@ static void EnsureRenderTarget() {
             render.pDCRenderTarget->CreateSolidColorBrush(
                 D2D1::ColorF(D2D1::ColorF::Red), &render.pDebugBrushRed);
             render.pDCRenderTarget->CreateSolidColorBrush(
-                D2D1::ColorF(D2D1::ColorF::Blue), &render.pDebugBrushBlue);
+                D2D1::ColorF(D2D1::ColorF::Lime), &render.pDebugBrushGreen);
         }
     }
 }
@@ -2076,7 +2076,7 @@ static void DrawDebug(const POINT& pt, int vX, int vY,
                                            boxCy + boxH / 2.0f);
         if (render.pDebugBrush) {
             render.pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-            render.pDCRenderTarget->DrawRectangle(debugBox, render.pDebugBrush, 1.0f);
+            render.pDCRenderTarget->DrawRectangle(debugBox, render.pDebugBrush, 2.0f);
         }
         if (cursor.visibleValid && render.pDebugBrushRed) {
             float baseX = boxCx - boxW / 2.0f;
@@ -2087,23 +2087,23 @@ static void DrawDebug(const POINT& pt, int vX, int vY,
                 baseX + cursor.visRight * cursor.dpiScaleX,
                 baseY + cursor.visBottom * cursor.dpiScaleY);
             render.pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-            render.pDCRenderTarget->DrawRectangle(visBox, render.pDebugBrushRed, 1.0f);
+            render.pDCRenderTarget->DrawRectangle(visBox, render.pDebugBrushRed, 2.0f);
         }
         GrowBBox(bbox, hasBBox,
                  (LONG)debugBox.left - 1, (LONG)debugBox.top - 1,
                  (LONG)debugBox.right + 1, (LONG)debugBox.bottom + 1);
     }
 
-    // Blue "+" marking the exact trail start (head point).
-    if (settings.debugShowOutline && !smoothed.empty() && render.pDebugBrushBlue) {
+    // Green "+" marking the exact trail start (head point).
+    if (settings.debugShowOutline && !smoothed.empty() && render.pDebugBrushGreen) {
         float hx = smoothed[0].x;
         float hy = smoothed[0].y;
-        const float half = 5.0f;
+        const float half = 8.0f;
         render.pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
         render.pDCRenderTarget->DrawLine(D2D1::Point2F(hx - half, hy),
-                                    D2D1::Point2F(hx + half, hy), render.pDebugBrushBlue, 1.0f);
+                                    D2D1::Point2F(hx + half, hy), render.pDebugBrushGreen, 2.0f);
         render.pDCRenderTarget->DrawLine(D2D1::Point2F(hx, hy - half),
-                                    D2D1::Point2F(hx, hy + half), render.pDebugBrushBlue, 1.0f);
+                                    D2D1::Point2F(hx, hy + half), render.pDebugBrushGreen, 2.0f);
         GrowBBox(bbox, hasBBox,
                  (LONG)hx - (LONG)half - 1, (LONG)hy - (LONG)half - 1,
                  (LONG)hx + (LONG)half + 1, (LONG)hy + (LONG)half + 1);

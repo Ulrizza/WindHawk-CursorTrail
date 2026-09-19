@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.16
+- Debug: Show outline now draws 2px boxes, a green trail-start `+` (was blue) with longer arms, and 2px `+` strokes.
+
 ## 0.15
 - Added a Color setting to Cursor ghost (`ghostOptions.color.values`, `blend_width`, `interpolation`): a single hex color or a comma-separated list for a head-to-tail gradient. Empty (the default) keeps the cursor's own colors.
 - Added a Replace subgroup (`ghostOptions.color.replace`) with a `mode` selector and a `custom` color. `auto` (default) recolors the cursor's enclosed center color, ignoring the outline/contour (`AnalyzeCursorColors`; falls back to the largest region when nothing is enclosed); `custom` recolors the `custom` color (default `FFFFFF`; set `000000` to recolor a black cursor body); `whole` recolors every non-transparent pixel.
