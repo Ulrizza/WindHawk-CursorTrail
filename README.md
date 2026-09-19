@@ -13,11 +13,12 @@ A [Windhawk](https://windhawk.net) mod that renders a customizable cursor trail 
 - A render thread draws sampled points via a layered (`WS_EX_LAYERED`) topmost transparent window, using Direct2D with per-pixel alpha via `UpdateLayeredWindow`.
 - For the line style, point positions are spatially decimated and smoothed with Chaikin subdivision before rendering. For the ghost style, the poll thread only pushes a sample once the cursor has travelled the configured spawn distance, so each copy is latched at a fixed screen position; the renderer draws them without further decimation.
 - Trail segments automatically expire after the configured tail duration. The overlay is paused when a fullscreen exclusive (game) application is detected.
+- On Windows 11 the overlay cannot cover the taskbar or Start menu by itself: since Windows 8, windows live in fixed Z-order bands (`ZBID`), and the taskbar (`ZBID_IMMERSIVE_MOGO`, 6) and Start menu sit in bands above the desktop band (1) regardless of `WS_EX_TOPMOST`. The optional **Cursor trail helper - always on top** companion mod (see below) moves the overlay into `ZBID_SYSTEM_TOOLS` (16) so it draws above them.
 - When the cursor is hidden (e.g. Windows' hide-while-typing), the trail fades out over the tail duration in both trail modes.
 
 ## Architecture
 
-Single translation unit (`CursorTrail.cpp`). All state is file-scope, grouped into five struct instances:
+The main mod is a single translation unit (`CursorTrail.cpp`); the optional always-on-top helper (see [Above the taskbar](#above-the-taskbar-companion-mod)) is a separate mod in `CursorTrailBand.cpp`. This section describes the main mod. All state is file-scope, grouped into five struct instances:
 
 | Instance | Type | Purpose |
 |---|---|---|
@@ -98,6 +99,15 @@ Single translation unit (`CursorTrail.cpp`). All state is file-scope, grouped in
 | `waveform.period` | Milliseconds per full wave cycle (lower = faster wobble) |
 | `debug.show_outline` | `False` (default) — draw white (bitmap bounds) and red (visible pixels) outline boxes around the cursor, plus a blue `+` at the trail start |
 
+## Above the taskbar (companion mod)
+
+The trail is a normal desktop-band window, so on Windows 11 it is drawn *under* the taskbar and Start menu. To lift it above them, install the companion **Cursor trail helper - always on top** mod (`CursorTrailBand.cpp`, mod id `cursor-trail-helper-always-on-top`) alongside this one.
+
+- It is injected into `explorer.exe` and moves the overlay to `ZBID_SYSTEM_TOOLS` (16) — the same band Task Manager's "Always on top" uses — via the undocumented `SetWindowBand` API.
+- It finds the overlay by its window class name (`SmearFrameOverlayClass`), so the two mods have no runtime coupling other than that name.
+- If direct banding is denied, it captures the IAM access key by hooking `NtUserEnableIAMAccess`; that requires pressing the **Win key** (or opening a shell surface) once after load.
+- Caveats: undocumented APIs; the trail then also draws above Task Manager and Alt-Tab (it stays click-through). Enable/disable it independently of the main mod.
+
 ## Building
 
 Requires the Windhawk SDK. Link against `d2d1`, `ole32`, `gdi32`, `shell32`, `windowscodecs`, `winmm`, and `shcore`.
@@ -106,3 +116,5 @@ Requires the Windhawk SDK. Link against `d2d1`, `ole32`, `gdi32`, `shell32`, `wi
 # From the Windhawk mod directory:
 cl /EHsc /O2 CursorTrail.cpp /link d2d1.lib ole32.lib gdi32.lib shell32.lib windowscodecs.lib winmm.lib shcore.lib
 ```
+
+The always-on-top helper (`CursorTrailBand.cpp`) needs no extra libraries.

@@ -1,7 +1,7 @@
 // ==WindhawkMod==
 // @id              cursor-trail
 // @name            Cursor trail
-// @description     Cursor trail overlay with configurable styles (simple line, cursor ghost)
+// @description     Cursor trail overlay with configurable styles (simple line, cursor ghost). Optional companion mod draws it above the taskbar and Start menu.
 // @version         0.14
 // @author          Ulrizza
 // @license         MIT
@@ -39,6 +39,12 @@ Draws a trail behind the mouse cursor that follows its movement.
   center, *Smooth* glides there.
 - The trail fades out when the cursor is hidden (e.g. while typing), and
   rendering pauses over fullscreen games.
+
+## Above the taskbar and Start menu
+
+On Windows 11 the trail is drawn under the taskbar and Start menu. Install
+the companion **Cursor trail helper - always on top** mod to lift it above
+both (it needs a one-time Win-key press).
 
 ## Appearance
 
@@ -1965,6 +1971,8 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &render.pD2DFactory);
 
     HINSTANCE hInstance = GetModuleHandle(NULL);
+    // Keep in sync with kOverlayClass in the companion "Cursor trail helper -
+    // always on top" mod, which finds this window to raise it above the taskbar.
     const wchar_t CLASS_NAME[] = L"SmearFrameOverlayClass";
 
     WNDCLASS wc = { };
