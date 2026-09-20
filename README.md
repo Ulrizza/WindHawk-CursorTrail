@@ -1,7 +1,9 @@
 # WindHawk - Cursor Trail
 
-A [Windhawk](https://windhawk.net) mod that renders a customizable cursor trail overlay on the Windows desktop using Direct2D.
+A [Windhawk](https://windhawk.net) mod that renders a customizable cursor trail overlay on the Windows desktop using Direct2D.  
+<img alt="matrix" src="https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d" />  
 
+  
 ## Styles
 
 - **Simple line** — A thin polyline with configurable width, color(s), gradient stops, and per-segment opacity.
