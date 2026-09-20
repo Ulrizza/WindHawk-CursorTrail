@@ -1,7 +1,7 @@
 // ==WindhawkMod==
 // @id              cursor-trail
 // @name            Cursor trail
-// @description     Cursor trail overlay with configurable styles (simple line, cursor ghost). Optional companion mod draws it above the taskbar and Start menu.
+// @description     A fully customizable cursor trail overlay for the Windows desktop.
 // @version         0.16
 // @author          Ulrizza
 // @license         MIT
@@ -13,62 +13,435 @@
 /*
 # Cursor trail
 
-Draws a trail behind the mouse cursor that follows its movement.
+A fully customizable cursor trail overlay for the Windows desktop.
 
-## Styles
+![Cursor trail](https://raw.githubusercontent.com/user/repo/main/gifs/overview.gif)
 
-- **Simple line** — a line whose width, color, and opacity can change
-  along its length.
-- **Cursor ghost** — faded copies of the cursor image, each latched at the
-  spot where it was spawned (they stay put and only fade out). Each copy
-  keeps the exact cursor image from when it was sampled, so an image change
-  (e.g. arrow to I-beam) appears gradually along the trail.
+## The two styles
 
-## Trail behavior
+- **Simple line** — a polyline that follows the cursor; its width, color, and
+  opacity can change from head to tail.
+- **Cursor ghost** — faded copies of the cursor image, each latched at the spot
+  where it spawned (they stay put and only fade out). Each copy keeps the exact
+  cursor image from when it was sampled, so an image change (e.g. arrow to
+  I-beam) appears gradually along the trail.
 
-- **Trail mode** — choose how the trail disappears:
-  - *Time based*: each part of the trail fades after a set duration.
-  - *Size based*: the trail keeps a fixed length (for Cursor ghost, a fixed
-    number of cursor copies), even when the cursor stops.
-- **Tail duration / Tail length** — how long (ms) or how far (px) the trail
-  extends. For Cursor ghost, the size-based value is the number of copies.
-- **Timeout** (size based only) — how long the cursor must be still before
-  the trail starts fading (0 = always visible).
-- **Trail origin on cursor change** — what happens when the cursor image
-  changes: *None* freezes the origin, *Immediate* snaps to the new cursor
-  center, *Smooth* glides there.
-- The trail fades out when the cursor is hidden (e.g. while typing), and
-  rendering pauses over fullscreen games.
+## Features
 
-## Appearance
+- **Time based** vs **Size based** trails.
+- **Timing** — tail duration and inactivity timeout.
+- **Size** — stroke width (Simple line) and copy size (Cursor ghost).
+- **Color** — head-to-tail gradients, blend width, interpolation, and ghost
+  recoloring.
+- **Hotkey** — toggle the trail on/off with a customizable global hotkey.
 
-- **Width** — comma-separated stroke widths from head to tail, e.g. `2,1`
-  for a tapered trail, or `10,1,10,1` for a pulsing one. Repeat a value to
-  give it a bigger share (`2,2,2,2,1` = 80% at 2, 20% at 1).
-- **Color** — a single hex color (`RRGGBB`) or a comma-separated list for a
-  gradient from head to tail (e.g. `000000,FF0000,FFFFFF`). For Cursor
-  ghost, leave empty to keep the cursor's own colors. Otherwise pixels
-  selected by **Replace → Mode** are recolored to the Color value: *Auto*
-  uses the cursor's enclosed center color (ignoring the outline), *Custom*
-  uses the Custom color (e.g. `000000` to recolor a black cursor body), and
-  *Whole* recolors every non-transparent pixel.
-- **Blend width** — how much each color transition blends: `0` for hard
-  bands, `100` for a full gradient.
-- **Interpolation** — curve used to blend between colors (*Linear*,
-  *Smoothstep*, *Ease in*, *Ease out*).
-- **Opacity** — comma-separated opacity percentages (0–100) from head to
-  tail, e.g. `100,0` to fade out.
-- **Size** (Cursor ghost) — comma-separated size multipliers from head to
-  tail, e.g. `1,0.5,1,0.5` for a pulsing trail. `1` = same size, `2` =
-  twice, `0.8` = 80%.
-- **Antialiasing** — smooth or hard trail edges.
+## Settings
 
-## Fine-tuning
+### Enable/disable hotkey
 
-- **Trail offset (X / Y)** — nudge the trail origin in pixels; it is
-  centered on the cursor by default.
-- **Debug: Show outline** — overlay boxes on the detected cursor and trail
-  start to check alignment.
+**`hotkeyOptions.key`** — default *(empty)*. Global hotkey that toggles the trail on/off. Format `Modifier+Key`; at least one modifier (Ctrl, Alt, Shift, Win) is required. Empty disables the hotkey.
+
+`(empty)`
+
+![hotkeyOptions.key = empty](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.key.empty.gif)
+
+`Ctrl+Alt+T`
+
+![hotkeyOptions.key = Ctrl+Alt+T](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.key.Ctrl+Alt+T.gif)
+
+**`hotkeyOptions.animate`** — default `true`. Show a circle animation when the hotkey toggles the trail.
+
+`on`
+
+![hotkeyOptions.animate = on](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.animate.on.gif)
+
+`off`
+
+![hotkeyOptions.animate = off](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.animate.off.gif)
+
+The animation is a circle outline (2px, in the cursor's color, centered on the trail start and following the cursor): it grows and fades out when disabling, and shrinks and fades in when enabling.
+
+`toggle effect`
+
+![hotkey toggle effect](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.animate.toggle.gif)
+
+### Style
+
+**`style`** — default `simple_line`. Rendering style: Simple line or Cursor ghost.
+
+`simple_line`
+
+![style = simple_line](https://raw.githubusercontent.com/user/repo/main/gifs/style.simple_line.gif)
+
+`cursor_ghost`
+
+![style = cursor_ghost](https://raw.githubusercontent.com/user/repo/main/gifs/style.cursor_ghost.gif)
+
+### Simple line options
+
+**`simpleLineOptions.trail_mode`** — default `time_based`. `time_based` or `size_based`: how the trail expires.
+
+`time_based`
+
+![simpleLineOptions.trail_mode = time_based](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.trail_mode.time_based.gif)
+
+`size_based`
+
+![simpleLineOptions.trail_mode = size_based](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.trail_mode.size_based.gif)
+
+**`simpleLineOptions.timeBased.tail_duration`** — default `500`. Milliseconds each trail segment stays visible (min 20).
+
+`300`
+
+![simpleLineOptions.timeBased.tail_duration = 300](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.timeBased.tail_duration.300.gif)
+
+`1000`
+
+![simpleLineOptions.timeBased.tail_duration = 1000](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.timeBased.tail_duration.1000.gif)
+
+`2000`
+
+![simpleLineOptions.timeBased.tail_duration = 2000](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.timeBased.tail_duration.2000.gif)
+
+**`simpleLineOptions.sizeBased.tail_size`** — default `2000`. Total trail length in pixels (min 20).
+
+`500`
+
+![simpleLineOptions.sizeBased.tail_size = 500](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.sizeBased.tail_size.500.gif)
+
+`1500`
+
+![simpleLineOptions.sizeBased.tail_size = 1500](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.sizeBased.tail_size.1500.gif)
+
+`3000`
+
+![simpleLineOptions.sizeBased.tail_size = 3000](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.sizeBased.tail_size.3000.gif)
+
+**`simpleLineOptions.sizeBased.timeout`** — default `2000`. Milliseconds of inactivity before the trail fades, using the Time based duration (0 = disabled).
+
+`0`
+
+![simpleLineOptions.sizeBased.timeout = 0](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.sizeBased.timeout.0.gif)
+
+`1000`
+
+![simpleLineOptions.sizeBased.timeout = 1000](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.sizeBased.timeout.1000.gif)
+
+`5000`
+
+![simpleLineOptions.sizeBased.timeout = 5000](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.sizeBased.timeout.5000.gif)
+
+**`simpleLineOptions.width.values`** — default `2,1`. Comma-separated stroke widths from head to tail. Each value gets an equal share; repeat to widen (e.g. `2,2,2,2,1`).
+
+`3`
+
+![simpleLineOptions.width.values = 3](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.width.values.uniform.gif)
+
+`5,1`
+
+![simpleLineOptions.width.values = 5,1](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.width.values.taper.gif)
+
+`10,1,10,1`
+
+![simpleLineOptions.width.values = 10,1,10,1](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.width.values.pulse.gif)
+
+**`simpleLineOptions.color.values`** — default `00A2FF,8B00FF`. Hex color(s) (`RRGGBB`) for the line; a list makes a head-to-tail gradient. Invalid entries fall back to black.
+
+`FF0000`
+
+![simpleLineOptions.color.values = FF0000](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.values.single.gif)
+
+`00A2FF,8B00FF`
+
+![simpleLineOptions.color.values = 00A2FF,8B00FF](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.values.two_stop.gif)
+
+`000000,FF0000,FFFFFF`
+
+![simpleLineOptions.color.values = 000000,FF0000,FFFFFF](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.values.multi.gif)
+
+**`simpleLineOptions.color.blend_width`** — default `100`. 0–100: how much of each transition blends (0 = hard bands, 100 = full gradient).
+
+`0`
+
+![simpleLineOptions.color.blend_width = 0](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.blend_width.0.gif)
+
+`50`
+
+![simpleLineOptions.color.blend_width = 50](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.blend_width.50.gif)
+
+`100`
+
+![simpleLineOptions.color.blend_width = 100](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.blend_width.100.gif)
+
+**`simpleLineOptions.color.interpolation`** — default `smoothstep`. Blending curve: `linear`, `smoothstep`, `ease_in`, `ease_out`.
+
+`linear`
+
+![simpleLineOptions.color.interpolation = linear](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.interpolation.linear.gif)
+
+`smoothstep`
+
+![simpleLineOptions.color.interpolation = smoothstep](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.interpolation.smoothstep.gif)
+
+`ease_in`
+
+![simpleLineOptions.color.interpolation = ease_in](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.interpolation.ease_in.gif)
+
+`ease_out`
+
+![simpleLineOptions.color.interpolation = ease_out](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.interpolation.ease_out.gif)
+
+**`simpleLineOptions.opacity.values`** — default `100,80`. Comma-separated opacity percentages (0–100) from head to tail.
+
+`100`
+
+![simpleLineOptions.opacity.values = 100](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.opacity.values.uniform.gif)
+
+`100,0`
+
+![simpleLineOptions.opacity.values = 100,0](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.opacity.values.fade.gif)
+
+`100,0,100`
+
+![simpleLineOptions.opacity.values = 100,0,100](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.opacity.values.pulse.gif)
+
+**`simpleLineOptions.trail_origin_on_cursor_change`** — default `smooth`. On cursor image change: `none` freezes the origin, `immediate` snaps, `smooth` glides there.
+
+`none`
+
+![simpleLineOptions.trail_origin_on_cursor_change = none](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.trail_origin_on_cursor_change.none.gif)
+
+`immediate`
+
+![simpleLineOptions.trail_origin_on_cursor_change = immediate](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.trail_origin_on_cursor_change.immediate.gif)
+
+`smooth`
+
+![simpleLineOptions.trail_origin_on_cursor_change = smooth](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.trail_origin_on_cursor_change.smooth.gif)
+
+**`simpleLineOptions.antialiasing`** — default `true`. Smooth the trail edges.
+
+`on`
+
+![simpleLineOptions.antialiasing = on](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.antialiasing.on.gif)
+
+`off`
+
+![simpleLineOptions.antialiasing = off](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.antialiasing.off.gif)
+
+### Cursor ghost options
+
+**`ghostOptions.trail_mode`** — default `time_based`. `time_based` or `size_based`: how the copies expire.
+
+`time_based`
+
+![ghostOptions.trail_mode = time_based](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.trail_mode.time_based.gif)
+
+`size_based`
+
+![ghostOptions.trail_mode = size_based](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.trail_mode.size_based.gif)
+
+**`ghostOptions.timeBased.tail_duration`** — default `500`. Milliseconds each cursor copy stays visible (min 20).
+
+`300`
+
+![ghostOptions.timeBased.tail_duration = 300](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.timeBased.tail_duration.300.gif)
+
+`1000`
+
+![ghostOptions.timeBased.tail_duration = 1000](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.timeBased.tail_duration.1000.gif)
+
+`2000`
+
+![ghostOptions.timeBased.tail_duration = 2000](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.timeBased.tail_duration.2000.gif)
+
+**`ghostOptions.sizeBased.tail_size`** — default `20`. Number of cursor copies in the trail (min 2, max 512).
+
+`5`
+
+![ghostOptions.sizeBased.tail_size = 5](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.sizeBased.tail_size.5.gif)
+
+`20`
+
+![ghostOptions.sizeBased.tail_size = 20](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.sizeBased.tail_size.20.gif)
+
+`50`
+
+![ghostOptions.sizeBased.tail_size = 50](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.sizeBased.tail_size.50.gif)
+
+**`ghostOptions.sizeBased.timeout`** — default `2000`. Milliseconds of inactivity before the copies fade, using the Time based duration (0 = disabled).
+
+`0`
+
+![ghostOptions.sizeBased.timeout = 0](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.sizeBased.timeout.0.gif)
+
+`1000`
+
+![ghostOptions.sizeBased.timeout = 1000](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.sizeBased.timeout.1000.gif)
+
+`5000`
+
+![ghostOptions.sizeBased.timeout = 5000](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.sizeBased.timeout.5000.gif)
+
+**`ghostOptions.spacing`** — default `10`. Extra distance in pixels between copies (0 = automatic, based on the copy count; max 200).
+
+`0`
+
+![ghostOptions.spacing = 0](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.spacing.0.gif)
+
+`10`
+
+![ghostOptions.spacing = 10](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.spacing.10.gif)
+
+`40`
+
+![ghostOptions.spacing = 40](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.spacing.40.gif)
+
+**`ghostOptions.size.values`** — default `1,0`. Comma-separated size multipliers from head to tail (1 = same, 0.8 = 80%). Avoid values above 1 (upscaled copies look pixelated).
+
+`1`
+
+![ghostOptions.size.values = 1](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.size.values.uniform.gif)
+
+`1,0`
+
+![ghostOptions.size.values = 1,0](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.size.values.shrink.gif)
+
+`0.5,1`
+
+![ghostOptions.size.values = 0.5,1](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.size.values.grow.gif)
+
+`1,0.5,1,0.5`
+
+![ghostOptions.size.values = 1,0.5,1,0.5](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.size.values.pulse.gif)
+
+**`ghostOptions.opacity.values`** — default `100,20`. Comma-separated opacity percentages (0–100) from head to tail.
+
+`100`
+
+![ghostOptions.opacity.values = 100](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.opacity.values.uniform.gif)
+
+`100,0`
+
+![ghostOptions.opacity.values = 100,0](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.opacity.values.fade.gif)
+
+`100,20,100,20`
+
+![ghostOptions.opacity.values = 100,20,100,20](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.opacity.values.pulse.gif)
+
+**`ghostOptions.color.values`** — default *(empty)*. Empty keeps the cursor's own colors; otherwise hex color(s) to recolor the pixels selected by Replace.
+
+`(empty)`
+
+![ghostOptions.color.values = empty](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.values.original.gif)
+
+`FFFFFF`
+
+![ghostOptions.color.values = FFFFFF](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.values.single.gif)
+
+`00A2FF,8B00FF`
+
+![ghostOptions.color.values = 00A2FF,8B00FF](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.values.gradient.gif)
+
+**`ghostOptions.color.blend_width`** — default `100`. 0–100: how much of each transition blends (0 = hard bands, 100 = full gradient).
+
+`0`
+
+![ghostOptions.color.blend_width = 0](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.blend_width.0.gif)
+
+`50`
+
+![ghostOptions.color.blend_width = 50](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.blend_width.50.gif)
+
+`100`
+
+![ghostOptions.color.blend_width = 100](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.blend_width.100.gif)
+
+**`ghostOptions.color.interpolation`** — default `smoothstep`. Blending curve: `linear`, `smoothstep`, `ease_in`, `ease_out`.
+
+`linear`
+
+![ghostOptions.color.interpolation = linear](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.interpolation.linear.gif)
+
+`smoothstep`
+
+![ghostOptions.color.interpolation = smoothstep](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.interpolation.smoothstep.gif)
+
+`ease_in`
+
+![ghostOptions.color.interpolation = ease_in](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.interpolation.ease_in.gif)
+
+`ease_out`
+
+![ghostOptions.color.interpolation = ease_out](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.interpolation.ease_out.gif)
+
+**`ghostOptions.color.replace.mode`** — default `auto`. Pixels to recolor: `auto` (enclosed center color), `custom` (the Custom color), or `whole` (every non-transparent pixel).
+
+`auto`
+
+![ghostOptions.color.replace.mode = auto](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.replace.mode.auto.gif)
+
+`custom`
+
+![ghostOptions.color.replace.mode = custom](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.replace.mode.custom.gif)
+
+`whole`
+
+![ghostOptions.color.replace.mode = whole](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.replace.mode.whole.gif)
+
+**`ghostOptions.color.replace.custom`** — default `FFFFFF`. Original cursor color to swap for `color.values` when mode is `custom` (e.g. `000000` for a black body).
+
+`FFFFFF`
+
+![ghostOptions.color.replace.custom = FFFFFF](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.replace.custom.FFFFFF.gif)
+
+`000000`
+
+![ghostOptions.color.replace.custom = 000000](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.replace.custom.000000.gif)
+
+`808080`
+
+![ghostOptions.color.replace.custom = 808080](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.replace.custom.808080.gif)
+
+### Common
+
+**`tail_offset.x`** — default `0`. Horizontal nudge of the trail origin in pixels (0 = auto-centered).
+
+`-10`
+
+![tail_offset.x = -10](https://raw.githubusercontent.com/user/repo/main/gifs/tail_offset.x.neg10.gif)
+
+`0`
+
+![tail_offset.x = 0](https://raw.githubusercontent.com/user/repo/main/gifs/tail_offset.x.0.gif)
+
+`+10`
+
+![tail_offset.x = +10](https://raw.githubusercontent.com/user/repo/main/gifs/tail_offset.x.pos10.gif)
+
+**`tail_offset.y`** — default `0`. Vertical nudge of the trail origin in pixels (0 = auto-centered).
+
+`-10`
+
+![tail_offset.y = -10](https://raw.githubusercontent.com/user/repo/main/gifs/tail_offset.y.neg10.gif)
+
+`0`
+
+![tail_offset.y = 0](https://raw.githubusercontent.com/user/repo/main/gifs/tail_offset.y.0.gif)
+
+`+10`
+
+![tail_offset.y = +10](https://raw.githubusercontent.com/user/repo/main/gifs/tail_offset.y.pos10.gif)
+
+**`debug.show_outline`** — default `false`. Draw white (bitmap bounds) and red (visible pixels) outline boxes plus a green `+` at the trail start.
+
+`off`
+
+![debug.show_outline = off](https://raw.githubusercontent.com/user/repo/main/gifs/debug.show_outline.off.gif)
+
+`on`
+
+![debug.show_outline = on](https://raw.githubusercontent.com/user/repo/main/gifs/debug.show_outline.on.gif)
 
 ## Above the taskbar and Start menu
 
@@ -82,35 +455,29 @@ both (it needs a one-time Win-key press).
 /*
 - style: simple_line
   $name: Style
-  $description: Type of trail
+  $description: |-
+    Type of trail:
+    - Simple line: a line whose width, color, and opacity can change along its length
+    - Cursor ghost: faded copies of the cursor image, each latched where it spawned
   $options:
   - simple_line: Simple line
   - cursor_ghost: Cursor ghost
 - simpleLineOptions:
   - trail_mode: "time_based"
     $name: Trail mode
-    $description: Time based fades the trail over time; Size based keeps a fixed trail length even when the cursor stops
+    $description: |-
+      How the trail disappears:
+      - Time based: each part of the trail fades after the Tail duration
+      - Size based: keeps a fixed trail length even when the cursor stops
     $options:
     - time_based: Time based
     - size_based: Size based
-  - antialiasing: "true"
-    $name: Antialiasing
-    $description: Smooth the trail edges
-    $options:
-    - "true": "True"
-    - "false": "False"
-  - trail_origin_on_cursor_change: "smooth"
-    $name: Trail origin on cursor change
-    $description: "What the trail origin does when the cursor image changes: None freezes it, Immediate snaps to the new cursor center, Smooth glides with an ease-in-out transition."
-    $options:
-    - none: None
-    - immediate: Immediate
-    - smooth: Smooth
   - timeBased:
     - tail_duration: 500
       $name: Tail duration
       $description: How long each trail segment stays visible, in milliseconds. Minimum 20.
     $name: Time based
+    $description: Applies when Trail mode is Time based.
   - sizeBased:
     - tail_size: 2000
       $name: Tail length
@@ -119,21 +486,27 @@ both (it needs a one-time Win-key press).
       $name: Timeout
       $description: Milliseconds of inactivity before the trail starts fading (using the Time based tail duration). 0 = trail always visible.
     $name: Size based
+    $description: Applies when Trail mode is Size based.
   - width:
     - values: "2,1"
-      $name: Values
-      $description: "Comma-separated stroke widths in pixels from head to tail (e.g. \"2,1\" for a tapered trail, or \"10,1,10,1\" for a pulsing trail). Each value gets an equal share; repeat to widen (e.g. \"2,2,2,2,1\" = 80%% at 2, 20%% at 1). Minimum 1."
+      $name: Values (head to tail)
+      $description: "Comma-separated stroke widths in pixels from head to tail (e.g. \"2,1\" for a tapered trail, or \"10,1,10,1\" for a pulsing trail). Each value gets an equal share; repeat to widen (e.g. \"2,2,2,2,1\" = 80% at 2, 20% at 1). Minimum 1."
     $name: Width
   - color:
-    - values: "FF0000,FF7F00,FFFF00,7FFF00,00FF00,00FFFF,0000FF,4B0082,8B00FF"
-      $name: Values
-      $description: "Single hex (RRGGBB without #, e.g. 000000 for black) or comma-separated list for a gradient from head to tail (e.g. 000000,FF0000,FFFFFF for black->red->white). Each color gets an equal share; repeat to widen. Invalid entries are skipped."
+    - values: "00A2FF,8B00FF"
+      $name: Values (head to tail)
+      $description: "Single hex (RRGGBB without #, e.g. 000000 for black) or comma-separated list for a gradient from head to tail (e.g. 000000,FF0000,FFFFFF for black->red->white). Each color gets an equal share; repeat to widen. Invalid entries fall back to black."
     - blend_width: 100
       $name: Blend width
-      $description: Percentage of each transition spent blending (0 = pure bands, 100 = full gradient). 50 with red,blue gives 25% hard red, 50% blend, 25% hard blue.
+      $description: Percentage of each transition spent blending (0 = pure bands, 100 = full gradient). 50 with red,blue gives 25% hard red, 50% blend, 25% hard blue. Only applies with two or more colors.
     - interpolation: "smoothstep"
       $name: Interpolation
-      $description: Easing curve used to blend between colors
+      $description: |-
+        Easing curve used to blend between colors (only applies with two or more colors):
+        - Linear
+        - Smoothstep
+        - Ease in
+        - Ease out
       $options:
       - linear: Linear
       - smoothstep: Smoothstep
@@ -142,14 +515,32 @@ both (it needs a one-time Win-key press).
     $name: Color
   - opacity:
     - values: "100,80"
-      $name: Values
+      $name: Values (head to tail)
       $description: Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade, or "100,0,100" for a pulse). Each value gets an equal share; repeat to widen. Leave one value for uniform opacity.
     $name: Opacity
+  - trail_origin_on_cursor_change: "smooth"
+    $name: Trail origin on cursor change
+    $description: |-
+      What the trail origin does when the cursor image changes:
+      - None: freezes the origin
+      - Immediate: snaps to the new cursor center
+      - Smooth: glides there with an ease-in-out transition
+    $options:
+    - none: None
+    - immediate: Immediate
+    - smooth: Smooth
+  - antialiasing: true
+    $name: Antialiasing
+    $description: Smooth the trail edges.
+  $description: Applies when Style is Simple line.
   $name: Simple line options
 - ghostOptions:
   - trail_mode: "time_based"
     $name: Trail mode
-    $description: Time based fades the copies over time; Size based keeps a fixed number of copies even when the cursor stops
+    $description: |-
+      How the copies disappear:
+      - Time based: each copy fades after the Tail duration
+      - Size based: keeps a fixed number of copies even when the cursor stops
     $options:
     - time_based: Time based
     - size_based: Size based
@@ -158,37 +549,44 @@ both (it needs a one-time Win-key press).
       $name: Tail duration
       $description: How long each cursor copy stays visible, in milliseconds. Minimum 20.
     $name: Time based
+    $description: Applies when Trail mode is Time based.
   - sizeBased:
     - tail_size: 20
       $name: Copies
-      $description: Number of cursor copies in the trail (Size based mode). Minimum 2.
+      $description: Number of cursor copies in the trail (Size based mode). Minimum 2, maximum 512.
     - timeout: 2000
       $name: Timeout
       $description: Milliseconds of inactivity before the trail starts fading (using the Time based tail duration). 0 = trail always visible.
     $name: Size based
+    $description: Applies when Trail mode is Size based.
   - spacing: 10
     $name: Copy spacing
-    $description: Extra distance in pixels added between cursor copies (0 = automatic, speed-adaptive).
+    $description: Extra distance in pixels added between cursor copies (0 = automatic, based on the copy count). Maximum 200.
   - size:
     - values: "1,0"
-      $name: Values
-      $description: "Comma-separated size multipliers from head to tail (1 = same size, 0.8 = 80%%, 2 = twice). Each value gets an equal share; repeat to widen (e.g. \"1,0.5,1,0.5\"). Avoid values above 1 (upscaled copies look pixelated); use the Windows cursor size setting to enlarge the cursor."
+      $name: Values (head to tail)
+      $description: "Comma-separated size multipliers from head to tail (1 = same size, 0.8 = 80%, 2 = twice). Each value gets an equal share; repeat to widen (e.g. \"1,0.5,1,0.5\"). Avoid values above 1 (upscaled copies look pixelated); use the Windows cursor size setting to enlarge the cursor."
     $name: Size
   - opacity:
     - values: "100,20"
-      $name: Values
+      $name: Values (head to tail)
       $description: Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade). Each value gets an equal share; repeat to widen.
     $name: Opacity
   - color:
     - values: ""
-      $name: Values
-      $description: "Leave empty to keep the cursor's own colors. Otherwise a single hex (RRGGBB without #) or comma-separated list for a gradient from head to tail; pixels matching the Replace color are recolored to this value (FFFFFF makes white copies). Each color gets an equal share; repeat to widen. Invalid entries are skipped."
+      $name: Values (head to tail)
+      $description: "Leave empty to keep the cursor's own colors. Otherwise a single hex (RRGGBB without #) or comma-separated list for a gradient from head to tail; pixels matching the Replace color are recolored to this value (FFFFFF makes white copies). Each color gets an equal share; repeat to widen. Invalid entries fall back to black. A single color disables Blend width and Interpolation."
     - blend_width: 100
       $name: Blend width
-      $description: Percentage of each transition spent blending (0 = pure bands, 100 = full gradient).
+      $description: Percentage of each transition spent blending (0 = pure bands, 100 = full gradient). Only applies with two or more colors.
     - interpolation: "smoothstep"
       $name: Interpolation
-      $description: Easing curve used to blend between colors
+      $description: |-
+        Easing curve used to blend between colors (only applies with two or more colors):
+        - Linear
+        - Smoothstep
+        - Ease in
+        - Ease out
       $options:
       - linear: Linear
       - smoothstep: Smoothstep
@@ -197,17 +595,34 @@ both (it needs a one-time Win-key press).
     - replace:
       - mode: "auto"
         $name: Mode
-        $description: "Which cursor pixels to recolor: Auto uses the cursor's enclosed center color (ignoring the outline/contour; falls back to the largest area when nothing is enclosed), Custom uses the Custom color below, and Whole recolors every non-transparent pixel."
+        $description: |-
+          Which cursor pixels to recolor:
+          - Auto: the cursor's enclosed center color (ignoring the outline/contour; falls back to the largest area when nothing is enclosed)
+          - Custom: the Custom color below
+          - Whole: every non-transparent pixel
         $options:
-        - auto: Auto (dominant color)
+        - auto: Auto (center color)
         - custom: Custom
         - whole: Whole cursor
       - custom: "FFFFFF"
         $name: Custom color
         $description: "Original cursor color to replace with the Values color (used when Mode is Custom). Set 000000 to recolor a black cursor body, or FFFFFF to recolor a white outline."
       $name: Replace
+      $description: Only used when Color > Values is set.
     $name: Color
+  $description: Applies when Style is Cursor ghost.
   $name: Cursor ghost options
+- hotkeyOptions:
+  - key: ""
+    $name: Key
+    $description: >-
+      Press to toggle the trail on or off. Format: Modifier+Key (e.g. Ctrl+Alt+T).
+      Modifiers: Ctrl, Alt, Shift, Win. At least one modifier is required.
+      Leave empty to disable the hotkey.
+  - animate: true
+    $name: Animation
+    $description: Show a circle animation when the hotkey toggles the trail.
+  $name: Enable/disable hotkey
 - tail_offset:
   - x: 0
     $name: X
@@ -233,6 +648,7 @@ both (it needs a one-time Win-key press).
 #include <mmsystem.h>
 #include <algorithm>
 #include <atomic>
+#include <cwctype>
 #include <deque>
 #include <mutex>
 #include <string>
@@ -381,6 +797,7 @@ struct RenderResources {
     ID2D1Factory*         pD2DFactory = nullptr;
     ID2D1DCRenderTarget*  pDCRenderTarget = nullptr;
     ID2D1SolidColorBrush* pSimpleLineBrush = nullptr;
+    ID2D1SolidColorBrush* pEffectBrush = nullptr;   // enable/disable toggle circle
     ID2D1StrokeStyle*     pStrokeStyle = nullptr;
     // DEBUG brushes (temporary): white = bitmap bounds, red = visible pixels, green = trail start.
     ID2D1SolidColorBrush* pDebugBrush = nullptr;
@@ -408,6 +825,7 @@ struct Runtime {
     std::atomic<bool> isGameRunning{false};   // set by render thread, read by poll thread
     std::atomic<bool> cursorHidden{false};    // set by render thread, read by poll thread
     std::atomic<bool> renderScheduled{false}; // set by MMTimerCallback, cleared by overlay thread
+    std::atomic<bool> trailEnabled{true};     // toggled by the enable/disable hotkey; read by both threads
     int     sampleRate = 1;                   // polling interval in ms
     MMRESULT mmTimerId = 0;
 
@@ -421,6 +839,27 @@ struct Runtime {
     bool  needsClear = false;
     DWORD lastFullscreenCheck = 0;
 };
+
+// Transient circle effect played when the enable/disable hotkey toggles the
+// trail. Owned by the overlay thread (started on WM_HOTKEY, drawn in
+// SmearTimerProc), so it needs no locking. The circle follows the cursor while
+// it plays:
+//   disable: radius 0 -> R, alpha 1 -> 0, ease in  (grows, fades out)
+//   enable:  radius R -> 0, alpha 0 -> 1, ease out (shrinks, fades in)
+struct ToggleEffect {
+    bool  active = false;
+    bool  enabling = false;   // true = enable animation, false = disable animation
+    DWORD startTime = 0;      // timeGetTime() at trigger
+    Rgb   color = { 1.0f, 1.0f, 1.0f };  // cursor color, captured at trigger
+};
+
+// Toggle-effect timing/size. The circle is a 2px outline whose diameter is
+// kEffectDiameterFactor times the cursor's on-screen size.
+static const DWORD kEffectDurationMs = 400;
+static const float kEffectDiameterFactor = 6.0f;
+static const float kEffectStrokeWidth = 2.0f;
+
+ToggleEffect toggleEffect;
 
 Settings         settings;
 CursorState      cursor;
@@ -484,6 +923,151 @@ static std::wstring ReadStringSetting(const wchar_t* key, const std::wstring& de
     std::wstring r = (s && *s) ? std::wstring(s) : def;
     if (s) Wh_FreeStringSetting(s);
     return r;
+}
+
+// --- Enable/disable hotkey -------------------------------------------------
+// One global hotkey toggles the trail. It is registered on the overlay window,
+// which already pumps messages, so WM_HOTKEY is delivered on the overlay
+// thread. MOD_NOREPEAT suppresses auto-repeat while the combo is held.
+static const int kHotkeyId = 1;
+static const UINT kMsgApplyHotkey = WM_APP + 1;
+
+// Splits on '+', trimming spaces and dropping empty tokens.
+static std::vector<std::wstring> SplitOnPlus(const std::wstring& input) {
+    std::vector<std::wstring> result;
+    size_t start = 0;
+    while (true) {
+        size_t plus = input.find(L'+', start);
+        std::wstring token = (plus == std::wstring::npos)
+            ? input.substr(start)
+            : input.substr(start, plus - start);
+        size_t first = token.find_first_not_of(L" \t");
+        size_t last = token.find_last_not_of(L" \t");
+        if (first != std::wstring::npos && last != std::wstring::npos) {
+            result.push_back(token.substr(first, last - first + 1));
+        }
+        if (plus == std::wstring::npos) break;
+        start = plus + 1;
+    }
+    return result;
+}
+
+// Maps an uppercased key name (e.g. "A", "F5", "SPACE") to a virtual-key code,
+// or 0 when unknown.
+static UINT VkFromKeyName(const std::wstring& name) {
+    if (name.size() == 1) {
+        wchar_t c = name[0];
+        if (c >= L'A' && c <= L'Z') return (UINT)c;
+        if (c >= L'0' && c <= L'9') return (UINT)c;
+    }
+
+    if (name.size() >= 2 && name[0] == L'F') {
+        int n = 0;
+        bool ok = true;
+        for (size_t i = 1; i < name.size(); ++i) {
+            if (name[i] < L'0' || name[i] > L'9') { ok = false; break; }
+            n = n * 10 + (name[i] - L'0');
+        }
+        if (ok && n >= 1 && n <= 24) return VK_F1 + (UINT)(n - 1);
+    }
+
+    static const struct { const wchar_t* name; UINT vk; } kNamedKeys[] = {
+        { L"BACKSPACE", VK_BACK },     { L"TAB", VK_TAB },
+        { L"ENTER", VK_RETURN },       { L"RETURN", VK_RETURN },
+        { L"ESC", VK_ESCAPE },         { L"ESCAPE", VK_ESCAPE },
+        { L"SPACE", VK_SPACE },        { L"INSERT", VK_INSERT },
+        { L"DELETE", VK_DELETE },      { L"DEL", VK_DELETE },
+        { L"HOME", VK_HOME },          { L"END", VK_END },
+        { L"PAGEUP", VK_PRIOR },       { L"PAGEDOWN", VK_NEXT },
+        { L"UP", VK_UP },              { L"DOWN", VK_DOWN },
+        { L"LEFT", VK_LEFT },          { L"RIGHT", VK_RIGHT },
+        { L"CAPSLOCK", VK_CAPITAL },   { L"NUMLOCK", VK_NUMLOCK },
+        { L"SCROLLLOCK", VK_SCROLL },  { L"PRINTSCREEN", VK_SNAPSHOT },
+        { L"PAUSE", VK_PAUSE },        { L"APPS", VK_APPS },
+        { L"MINUS", VK_OEM_MINUS },    { L"PLUS", VK_OEM_PLUS },
+        { L"COMMA", VK_OEM_COMMA },    { L"PERIOD", VK_OEM_PERIOD },
+        { L"SLASH", VK_OEM_2 },        { L"SEMICOLON", VK_OEM_1 },
+        { L"QUOTE", VK_OEM_7 },        { L"BACKTICK", VK_OEM_3 },
+        { L"LBRACKET", VK_OEM_4 },     { L"BACKSLASH", VK_OEM_5 },
+        { L"RBRACKET", VK_OEM_6 },
+    };
+    for (const auto& k : kNamedKeys) {
+        if (name == k.name) return k.vk;
+    }
+
+    // Single punctuation/OEM characters, resolved against the current layout.
+    if (name.size() == 1) {
+        SHORT vk = VkKeyScanW(name[0]);
+        if (vk != -1) return (UINT)(vk & 0xFF);
+    }
+
+    return 0;
+}
+
+// Parses "Modifier+...+Key" into modifiers and a virtual key. Returns false for
+// an empty or unknown string. At least one modifier and exactly one key are
+// required, so a bare key is never grabbed system-wide.
+static bool ParseHotkey(const std::wstring& str, UINT& modifiersOut, UINT& vkOut) {
+    UINT modifiers = 0;
+    UINT vk = 0;
+
+    for (std::wstring part : SplitOnPlus(str)) {
+        for (wchar_t& c : part) c = (wchar_t)towupper((wint_t)c);
+
+        if (part == L"CTRL" || part == L"CONTROL") { modifiers |= MOD_CONTROL; continue; }
+        if (part == L"ALT")   { modifiers |= MOD_ALT; continue; }
+        if (part == L"SHIFT") { modifiers |= MOD_SHIFT; continue; }
+        if (part == L"WIN" || part == L"WINDOWS") { modifiers |= MOD_WIN; continue; }
+
+        if (vk != 0) return false;  // more than one non-modifier key
+
+        vk = VkFromKeyName(part);
+        if (vk == 0) {
+            // Numeric virtual key, e.g. "0x70".
+            try {
+                size_t pos = 0;
+                unsigned long n = std::stoul(part, &pos, 0);
+                if (pos == part.size() && n > 0 && n < 0x100) {
+                    vk = (UINT)n;
+                } else {
+                    return false;
+                }
+            } catch (...) {
+                return false;
+            }
+        }
+    }
+
+    if (modifiers == 0 || vk == 0) return false;
+    modifiersOut = modifiers;
+    vkOut = vk;
+    return true;
+}
+
+// (Re)registers the hotkey from the current setting on the overlay window. Must
+// run on the overlay thread, which owns the window and its message queue.
+static void ApplyHotkey(HWND hwnd) {
+    UnregisterHotKey(hwnd, kHotkeyId);
+
+    std::wstring hotkey = ReadStringSetting(L"hotkeyOptions.key", L"");
+    if (hotkey.empty()) {
+        Wh_Log(L"Hotkey disabled (empty setting)");
+        return;
+    }
+
+    UINT modifiers = 0, vk = 0;
+    if (!ParseHotkey(hotkey, modifiers, vk)) {
+        Wh_Log(L"Failed to parse hotkey '%s' (use Modifier+Key, e.g. Ctrl+Alt+T)",
+               hotkey.c_str());
+        return;
+    }
+
+    if (RegisterHotKey(hwnd, kHotkeyId, modifiers | MOD_NOREPEAT, vk)) {
+        Wh_Log(L"Registered hotkey '%s'", hotkey.c_str());
+    } else {
+        Wh_Log(L"RegisterHotKey failed for '%s': %u (another app may use it)",
+               hotkey.c_str(), GetLastError());
+    }
 }
 
 // Parses a comma-separated list of floats into out. Each value is clamped to
@@ -679,7 +1263,7 @@ void LoadSettings() {
         LoadColorSettings(L"simpleLineOptions", L"000000");
         settings.ghostTints.clear();
 
-        settings.antialiasing = ReadStringSetting(L"simpleLineOptions.antialiasing", L"true") != L"false";
+        settings.antialiasing = Wh_GetIntSetting(L"simpleLineOptions.antialiasing") != 0;
 
         settings.trailOriginOnCursorChange = ReadStringSetting(L"simpleLineOptions.trail_origin_on_cursor_change", L"smooth");
         if (settings.trailOriginOnCursorChange != L"none" &&
@@ -1072,6 +1656,51 @@ static CursorColorAnalysis AnalyzeCursorColors(const BYTE* src, int w, int h) {
     result.dominant = best;
     result.runnerUp = (secondCount > 0) ? second : best;
     return result;
+}
+
+// Returns the cursor's representative color: the enclosed center color when one
+// exists (the same pick the ghost "auto" replace mode uses), otherwise the
+// largest region. Renders the cursor to a DIB via DrawIconEx (color + mask +
+// anti-aliased alpha), the same path EnsureCursorBitmap uses.
+static bool GetCursorColor(HCURSOR hCursor, Rgb& out) {
+    if (!hCursor) return false;
+
+    int targetW = 32, targetH = 32;
+    CursorGeom g;
+    if (GetCursorGeom(hCursor, g) && g.bmWidth > 0 && g.bmHeight > 0) {
+        targetW = (int)floorf(g.bmWidth * g.dpiScaleX + 0.5f);
+        targetH = (int)floorf(g.bmHeight * g.dpiScaleY + 0.5f);
+    }
+    if (targetW <= 0 || targetH <= 0) return false;
+
+    BITMAPINFO bmi = { };
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = targetW;
+    bmi.bmiHeader.biHeight = -targetH;   // top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* pBits = nullptr;
+    HBITMAP hDib = CreateDIBSection(NULL, &bmi, DIB_RGB_COLORS, &pBits, NULL, 0);
+    if (!hDib || !pBits) {
+        if (hDib) DeleteObject(hDib);
+        return false;
+    }
+
+    HDC hdcMem = CreateCompatibleDC(NULL);
+    if (!hdcMem) { DeleteObject(hDib); return false; }
+    HGDIOBJ hOld = SelectObject(hdcMem, hDib);
+    ZeroMemory(pBits, (size_t)targetW * targetH * 4);
+    DrawIconEx(hdcMem, 0, 0, hCursor, targetW, targetH, 0, NULL, DI_NORMAL);
+    SelectObject(hdcMem, hOld);
+    DeleteDC(hdcMem);
+
+    CursorColorAnalysis ca = AnalyzeCursorColors((const BYTE*)pBits, targetW, targetH);
+    out = ca.hasInterior ? ca.interior : ca.dominant;
+
+    DeleteObject(hDib);
+    return true;
 }
 
 // Build and cache the recolored D2D bitmaps for a cursor handle, rendered at
@@ -1548,6 +2177,7 @@ void RenderCursorGhostStyle(const std::vector<D2D1_POINT_2F>& smoothed,
 // render.pStrokeStyle is factory-owned, so it survives target recreation.
 static void ReleaseRenderTargetResources() {
     if (render.pSimpleLineBrush) { render.pSimpleLineBrush->Release(); render.pSimpleLineBrush = nullptr; }
+    if (render.pEffectBrush) { render.pEffectBrush->Release(); render.pEffectBrush = nullptr; }
     if (render.pDebugBrush) { render.pDebugBrush->Release(); render.pDebugBrush = nullptr; }
     if (render.pDebugBrushRed) { render.pDebugBrushRed->Release(); render.pDebugBrushRed = nullptr; }
     if (render.pDebugBrushGreen) { render.pDebugBrushGreen->Release(); render.pDebugBrushGreen = nullptr; }
@@ -1617,8 +2247,9 @@ DWORD WINAPI PollThreadProc(LPVOID) {
 
     // Wait on the stop event with a runtime.sampleRate ms timeout to drive the loop.
     while (WaitForSingleObject(runtime.pollStopEvent, runtime.sampleRate) == WAIT_TIMEOUT) {
-        // Respect the game-running flag set by SmearTimerProc.
-        if (runtime.isGameRunning.load()) continue;
+        // Respect the game-running flag set by SmearTimerProc, and the
+        // enable/disable hotkey state.
+        if (runtime.isGameRunning.load() || !runtime.trailEnabled.load()) continue;
 
         POINT pt;
         if (!GetCursorPos(&pt)) continue;
@@ -1877,6 +2508,8 @@ static void EnsureRenderTarget() {
                 D2D1::ColorF(D2D1::ColorF::Red), &render.pDebugBrushRed);
             render.pDCRenderTarget->CreateSolidColorBrush(
                 D2D1::ColorF(D2D1::ColorF::Lime), &render.pDebugBrushGreen);
+            render.pDCRenderTarget->CreateSolidColorBrush(
+                D2D1::ColorF(D2D1::ColorF::White), &render.pEffectBrush);
         }
     }
 }
@@ -2187,6 +2820,79 @@ static void BlitOverlay(HWND hwnd, HDC hdcScreen, int vX, int vY, int vW, int vH
     ReleaseDC(NULL, hdcScreen);
 }
 
+// Starts the enable/disable circle effect. Runs on the overlay thread (from
+// WM_HOTKEY). The cursor color is captured now; the center follows the cursor
+// while the effect plays.
+static void StartToggleEffect(bool enabling) {
+    if (!Wh_GetIntSetting(L"hotkeyOptions.animate")) {
+        return;  // animation disabled
+    }
+
+    toggleEffect.enabling = enabling;
+    toggleEffect.startTime = timeGetTime();
+    toggleEffect.color = { 1.0f, 1.0f, 1.0f };
+
+    CURSORINFO ci = { sizeof(CURSORINFO) };
+    if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor) {
+        Rgb color;
+        if (GetCursorColor(ci.hCursor, color)) {
+            toggleEffect.color = color;
+        }
+    }
+
+    toggleEffect.active = true;
+}
+
+// Draws the toggle circle (2px outline) and grows bbox/hasBBox to cover it.
+// The center is the trail head (smoothed[0]), so it matches the start of the
+// trail exactly (including the origin glide and the ghost hotspot anchor), and
+// it follows the cursor because the head is rebuilt every frame.
+static void RenderToggleEffect(const std::vector<D2D1_POINT_2F>& smoothed,
+                               RECT& bbox, bool& hasBBox) {
+    if (!toggleEffect.active) return;
+    if (!render.pDCRenderTarget || !render.pEffectBrush) return;
+    if (smoothed.empty()) return;
+
+    DWORD now = timeGetTime();
+    float p = (float)(now - toggleEffect.startTime) / (float)kEffectDurationMs;
+    if (p >= 1.0f) {
+        toggleEffect.active = false;
+        runtime.needsClear = true;   // erase the last circle on the next frame
+        return;
+    }
+    if (p < 0.0f) p = 0.0f;
+
+    // Cursor on-screen size; the circle diameter is 6x that, so the radius is
+    // half of 6x.
+    float cursorSize = 32.0f;
+    if (cursor.bmWidth > 0 && cursor.bmHeight > 0) {
+        float w = cursor.bmWidth * cursor.dpiScaleX;
+        float h = cursor.bmHeight * cursor.dpiScaleY;
+        cursorSize = (w > h) ? w : h;
+    }
+    float maxRadius = cursorSize * kEffectDiameterFactor * 0.5f;
+
+    float eased = Ease(p, toggleEffect.enabling ? INTERP_EASE_OUT : INTERP_EASE_IN);
+    float radius = toggleEffect.enabling ? maxRadius * (1.0f - eased)
+                                         : maxRadius * eased;
+    float alpha = toggleEffect.enabling ? eased : (1.0f - eased);
+
+    float cx = smoothed[0].x;
+    float cy = smoothed[0].y;
+
+    const Rgb& c = toggleEffect.color;
+    render.pEffectBrush->SetColor(D2D1::ColorF(c.r * alpha, c.g * alpha, c.b * alpha, alpha));
+    render.pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    render.pDCRenderTarget->DrawEllipse(
+        D2D1::Ellipse(D2D1::Point2F(cx, cy), radius, radius),
+        render.pEffectBrush, kEffectStrokeWidth);
+
+    float margin = radius + kEffectStrokeWidth + 1.0f;
+    GrowBBox(bbox, hasBBox,
+             (LONG)(cx - margin), (LONG)(cy - margin),
+             (LONG)(cx + margin), (LONG)(cy + margin));
+}
+
 VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime) {
     UNREFERENCED_PARAMETER(uMsg);
     UNREFERENCED_PARAMETER(idEvent);
@@ -2202,25 +2908,33 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
         runtime.lastFullscreenCheck = dwTime;
     }
 
-    // Read local copies of the atomic flags for consistent use within this frame.
-    bool isGameCached = runtime.isGameRunning.load();
+    // Read local copies of the atomic flags for consistent use within this
+    // frame. The trail is suppressed (history cleared, overlay wiped) while a
+    // fullscreen game runs or the enable/disable hotkey has it turned off.
+    bool suppress = runtime.isGameRunning.load() || !runtime.trailEnabled.load();
+    bool effectActive = toggleEffect.active;
 
     int vX = GetSystemMetrics(SM_XVIRTUALSCREEN);
     int vY = GetSystemMetrics(SM_YVIRTUALSCREEN);
     int vW = GetSystemMetrics(SM_CXVIRTUALSCREEN);
     int vH = GetSystemMetrics(SM_CYVIRTUALSCREEN) - 1;
 
-    if (isGameCached) {
+    if (suppress) {
+        // Keep the cursor geometry fresh so the toggle circle can follow it
+        // even while the trail itself is off.
+        if (effectActive) {
+            UpdateCursorCenterOffset();
+        }
         {
             std::lock_guard<std::mutex> lock(runtime.historyMutex);
             bool wasEmpty = runtime.history.empty();
             runtime.history.clear();
-            if (wasEmpty && !runtime.needsClear) {
+            if (wasEmpty && !runtime.needsClear && !effectActive) {
                 return;
             }
         }
     } else {
-        // No game running — update cursor appearance caches. The poll thread
+        // Trail active — update cursor appearance caches. The poll thread
         // owns trail-origin selection (frozen when runtime.history is empty, unless
         // settings.trailOriginMode is Immediate/Smooth) and sample accumulation.
         UpdateCursorCenterOffset();
@@ -2233,7 +2947,8 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
         historyEmpty = runtime.history.empty();
     }
 
-    if (!historyEmpty || runtime.needsClear || (settings.debugShowOutline && cursor.bmWidth > 0 && cursor.bmHeight > 0)) {
+    if (!historyEmpty || runtime.needsClear || effectActive ||
+        (settings.debugShowOutline && cursor.bmWidth > 0 && cursor.bmHeight > 0)) {
         HDC hdcScreen = GetDC(NULL);
 
         EnsureBackbuffer(hdcScreen, vW, vH);
@@ -2276,6 +2991,8 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
             }
             RenderTrail(smoothed, cursors, ratios);
 
+            RenderToggleEffect(smoothed, curBBox, hasCurBBox);
+
             DrawDebug(pt, vX, vY, smoothed, curBBox, hasCurBBox);
 
             HRESULT hr = render.pDCRenderTarget->EndDraw();
@@ -2292,15 +3009,30 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
 }
 
 // Custom window proc for the overlay. Handles WM_TIMER (posted by the
-// multimedia timer callback) by calling SmearTimerProc directly. All other
-// messages go to DefWindowProc. This keeps all rendering on the overlay
-// thread while using the multimedia timer for non-coalesced wakeups.
+// multimedia timer callback) by calling SmearTimerProc directly. Also handles
+// the enable/disable hotkey (WM_HOTKEY) and hotkey re-registration on settings
+// change (kMsgApplyHotkey). All other messages go to DefWindowProc. This keeps
+// all rendering on the overlay thread while using the multimedia timer for
+// non-coalesced wakeups.
 LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     if (uMsg == WM_TIMER) {
         // Clear before rendering so a frame that arrives while this one is still
         // in flight can queue exactly one more render (bounded, no backlog).
         runtime.renderScheduled.store(false);
         SmearTimerProc(hwnd, uMsg, wParam, GetTickCount());
+        return 0;
+    }
+    if (uMsg == WM_HOTKEY) {
+        if ((int)wParam == kHotkeyId) {
+            bool enabled = !runtime.trailEnabled.load();
+            runtime.trailEnabled.store(enabled);
+            StartToggleEffect(enabled);
+            Wh_Log(L"Trail %s via hotkey", enabled ? L"enabled" : L"disabled");
+        }
+        return 0;
+    }
+    if (uMsg == kMsgApplyHotkey) {
+        ApplyHotkey(hwnd);
         return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -2370,6 +3102,9 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
 
     ShowWindow(runtime.overlayHwnd, SW_SHOWNA);
 
+    // Register the enable/disable hotkey (no-op when the setting is empty).
+    ApplyHotkey(runtime.overlayHwnd);
+
     // Start the high-frequency cursor polling thread.
     // The stop event is a manual-reset event, initially non-signalled.
     runtime.pollStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
@@ -2425,6 +3160,7 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     }
     timeEndPeriod(1);
 
+    UnregisterHotKey(runtime.overlayHwnd, kHotkeyId);
     DestroyWindow(runtime.overlayHwnd);
     UnregisterClass(CLASS_NAME, hInstance);
 
@@ -2472,6 +3208,12 @@ void WhTool_ModUninit() {
 
 void WhTool_ModSettingsChanged() {
     LoadSettings();
+
+    // Re-register the hotkey on the overlay thread, which owns the window and
+    // its message queue (RegisterHotKey/UnregisterHotKey are thread-bound).
+    if (runtime.overlayHwnd) {
+        PostMessage(runtime.overlayHwnd, kMsgApplyHotkey, 0, 0);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

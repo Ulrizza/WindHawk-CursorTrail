@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+- Settings UX pass before release:
+  - `simpleLineOptions.antialiasing` is now a boolean switch instead of a True/False dropdown.
+  - Fixed `%%` rendering literally in the Width and Size descriptions (now `%`).
+  - Reordered Simple line options to trail mode, tail geometry, appearance, then advanced options (Trail origin, Antialiasing).
+  - Added group descriptions noting which Style and which Trail mode each group applies to, and that Replace is only used when Color > Values is set.
+  - Clarified the copy-count max (512), copy-spacing max (200), invalid-color fallback, and that Blend width / Interpolation need two or more colors.
+  - Changed the Simple line default color from a 9-color rainbow to a two-stop `00A2FF,8B00FF` gradient.
+  - Renamed the "Values" labels to "Values (head to tail)" and the Auto replace mode label to "Auto (center color)".
+  - Multi-choice settings (Style, Trail mode, Trail origin, Interpolation, Replace mode) now describe each choice as a `-` bullet on its own line instead of one inline sentence.
+  - README: removed the non-existent `waveform.*` settings and added the missing `tail_offset.x` / `tail_offset.y` rows.
+- Reworked the mod description (Windhawk readme): one-phrase summary, a short summary of both styles, a trimmed features list, and a placeholder GIF per example value (79 examples across all 27 settings, no table). Updated `@description` to match and corrected the tagline in the description and README.
+- Added a customizable enable/disable hotkey, grouped under `hotkeyOptions` with `hotkeyOptions.key` (a `Modifier+Key` string, e.g. `Ctrl+Alt+T`; at least one modifier required; empty = disabled by default) and `hotkeyOptions.animate` (switch, default on). The key is parsed by `ParseHotkey`/`VkFromKeyName` and registered on the overlay window with `RegisterHotKey(..., MOD_NOREPEAT)`; `WM_HOTKEY` flips the new `runtime.trailEnabled` atomic, which suppresses sampling and clears/renders nothing like the fullscreen-game path. Re-registered on the overlay thread via `kMsgApplyHotkey` on settings change, unregistered on unload. Documented with example GIFs.
+- Added a circle animation on hotkey toggle (`ToggleEffect` / `StartToggleEffect` / `RenderToggleEffect`), controlled by `hotkeyOptions.animate`: a 2px outline in the cursor's color (`GetCursorColor`, using the ghost `auto` pick) for 400 ms, centered on the trail head (`smoothed[0]`, so it matches the start of the trail) and following the cursor. Disabling grows the circle (diameter up to 6× the cursor size) while fading out with ease-in; enabling shrinks it while fading in with ease-out. Drawn on the overlay thread and included in the dirty-rect bbox.
+
 ## 0.16
 - Debug: Show outline now draws 2px boxes, a green trail-start `+` (was blue) with longer arms, and 2px `+` strokes.
 

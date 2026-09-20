@@ -1,6 +1,6 @@
 # WindHawk - Cursor Trail
 
-A [Windhawk](https://windhawk.net) mod that renders a customizable cursor trail (motion blur) overlay on the Windows desktop using Direct2D.
+A [Windhawk](https://windhawk.net) mod that renders a customizable cursor trail overlay on the Windows desktop using Direct2D.
 
 ## Styles
 
@@ -39,7 +39,7 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 - `runtime.historyMutex` protects `runtime.history` (poll + render threads).
 - `cursor.offsetMutex` protects `cursor.centerOffset` / `cursor.visualOffset` / `cursor.frozenOffset` (written by render thread, read by poll thread).
 - Lock order is always `runtime.historyMutex` → `cursor.offsetMutex`.
-- `runtime.isGameRunning`, `runtime.cursorHidden`, and `runtime.renderScheduled` are atomics.
+- `runtime.isGameRunning`, `runtime.cursorHidden`, `runtime.renderScheduled`, and `runtime.trailEnabled` are atomics.
 - `origin.*`, `render.*`, and the cursor debug dimensions are single-thread owned (see table above).
 
 ### Render pipeline
@@ -51,9 +51,10 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 3. `ChaikinSmooth` (Simple line only) — two-pass corner smoothing; the ghost style draws its latched copies directly so its copy count matches the setting.
 4. `ComputeTrailBBox` — trail bounding box plus stroke-width (line) or cursor-size (ghost) margin.
 5. `RenderTrail` — dispatch to the active style renderer (`RenderSimpleLineStyle` or `RenderCursorGhostStyle`).
-6. `DrawDebug` — optional white/red outline boxes plus a green trail-start marker.
-7. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
-8. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
+6. `RenderToggleEffect` — optional enable/disable hotkey circle (2px outline, centered on the trail head, follows the cursor).
+7. `DrawDebug` — optional white/red outline boxes plus a green trail-start marker.
+8. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
+9. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
 
 ### Settings & interpolation
 
@@ -67,8 +68,9 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 ### Lifecycle
 
 - `WhTool_ModInit` — `LoadSettings()` then spawns `OverlayThreadProc`.
-- `WhTool_ModSettingsChanged` — `LoadSettings()`.
+- `WhTool_ModSettingsChanged` — `LoadSettings()`, then posts `kMsgApplyHotkey` to the overlay window to re-register the hotkey on its thread.
 - `WhTool_ModUninit` — signals the poll thread, kills the timer, and posts `WM_QUIT`.
+- The overlay thread registers the `hotkeyOptions.key` setting (`ApplyHotkey`) right after creating the window and unregisters it before destroying the window. `WM_HOTKEY` flips `runtime.trailEnabled`, which suppresses sampling/rendering like the fullscreen-game path does, and (when `hotkeyOptions.animate` is on) calls `StartToggleEffect` to play the circle animation centered on the trail head (disable: grows + fades out, ease in; enable: shrinks + fades in, ease out; 400 ms, 2px outline, diameter 6× the cursor, colored by `GetCursorColor`'s ghost-`auto` pick, following the cursor).
 - The `Wh_ModInit` / `Wh_ModAfterInit` / `Wh_ModUninit` block at the bottom of the file is Windhawk's tool-mod launcher boilerplate and should be left as-is.
 
 ## Settings
@@ -76,8 +78,10 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 | Setting | Description |
 |---|---|
 | `style` | Rendering style: `simple_line` or `cursor_ghost` |
+| `hotkeyOptions.key` | Global hotkey that toggles the trail on/off, e.g. `Ctrl+Alt+T`. At least one modifier (Ctrl/Alt/Shift/Win) is required; empty (default) disables the hotkey. Registered on the overlay window via `RegisterHotKey` (with `MOD_NOREPEAT`), so it fails silently if another app already owns the combo. |
+| `hotkeyOptions.animate` | Switch (default on) — play the circle animation when the hotkey toggles the trail. |
 | `simpleLineOptions.trail_mode` | `time_based` (default) or `size_based` — how the trail expires |
-| `simpleLineOptions.antialiasing` | `True` (default) or `False` — smooth trail edges or hard, pixelated edges |
+| `simpleLineOptions.antialiasing` | Switch (default on) — smooth trail edges or hard, pixelated edges |
 | `simpleLineOptions.trail_origin_on_cursor_change` | Behavior when the cursor image changes: `smooth` (default) glides to the new cursor center with an ease-in-out transition; `none` keeps the origin frozen; `immediate` snaps |
 | `simpleLineOptions.timeBased.tail_duration` | Milliseconds each trail segment stays visible (min 20) |
 | `simpleLineOptions.sizeBased.tail_size` | Total trail length in pixels — eviction walks from head and drops points past this distance (min 20) |
@@ -89,9 +93,9 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 | `simpleLineOptions.opacity.values` | Comma-separated opacity percentages (0-100), each gets equal share |
 | `ghostOptions.trail_mode` | `time_based` (default) or `size_based` — how the copies expire |
 | `ghostOptions.timeBased.tail_duration` | Milliseconds each cursor copy stays visible (min 20) |
-| `ghostOptions.sizeBased.tail_size` | Number of cursor copies in the trail, size-based mode (min 2) |
+| `ghostOptions.sizeBased.tail_size` | Number of cursor copies in the trail, size-based mode (min 2, max 512) |
 | `ghostOptions.sizeBased.timeout` | Milliseconds of inactivity before the copies fade using the Time based tail duration (0 = disabled) |
-| `ghostOptions.spacing` | Extra distance in pixels added between cursor copies. A new copy is stamped each time the cursor travels this gap (0 = automatic). |
+| `ghostOptions.spacing` | Extra distance in pixels added between cursor copies. A new copy is stamped each time the cursor travels this gap (0 = automatic, based on the copy count; max 200). |
 | `ghostOptions.size.values` | Comma-separated size multipliers from head to tail (1 = same size, 0.8 = 80%, 2 = twice). Each value gets an equal share; repeat to widen. Avoid values above 1 (upscaled copies look pixelated); use the Windows cursor size setting to enlarge the cursor |
 | `ghostOptions.opacity.values` | Comma-separated opacity percentages (0-100) from head to tail, each gets equal share |
 | `ghostOptions.color.values` | Hex color(s) for the cursor copies (comma-separated), each gets equal share. Empty (default) keeps the cursor's own colors; otherwise pixels matching the Replace color are recolored to this value |
@@ -99,9 +103,8 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 | `ghostOptions.color.replace.custom` | Original cursor color to swap for `color.values` when mode is `custom` (default `FFFFFF`, e.g. the white outline). Set `000000` to recolor a black cursor body |
 | `ghostOptions.color.blend_width` | 0-100: how much of each transition blends (0 = hard bands, 100 = full gradient) |
 | `ghostOptions.color.interpolation` | Blending curve: linear, smoothstep, ease_in, ease_out |
-| `waveform.type` | Wave pattern applied to the trail: `none`, `sinus`, `square`, or `triangle` |
-| `waveform.amplitude` | Maximum pixel offset applied by the waveform (0 = disabled) |
-| `waveform.period` | Milliseconds per full wave cycle (lower = faster wobble) |
+| `tail_offset.x` | Horizontal nudge of the trail origin in pixels (0 = auto-centered) |
+| `tail_offset.y` | Vertical nudge of the trail origin in pixels (0 = auto-centered) |
 | `debug.show_outline` | `False` (default) — draw white (bitmap bounds) and red (visible pixels) outline boxes around the cursor, plus a green `+` at the trail start |
 
 ## Above the taskbar (companion mod)
