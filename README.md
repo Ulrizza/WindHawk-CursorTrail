@@ -50,7 +50,7 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 2. `BuildTrailPoints` — snapshot `runtime.history`; the line style spatially decimates it, while the ghost style emits every latched copy in order, producing a parallel per-point `HCURSOR` list and (ghost only) a per-point opacity `ratio` list.
 3. `ChaikinSmooth` (Simple line only) — two-pass corner smoothing; the ghost style draws its latched copies directly so its copy count matches the setting.
 4. `ComputeTrailBBox` — trail bounding box plus stroke-width (line) or cursor-size (ghost) margin.
-5. `RenderTrail` — dispatch to the active style renderer (`RenderSimpleLineStyle` or `RenderCursorGhostStyle`).
+5. `RenderTrail` — dispatch to the active style renderer (`RenderSimpleLineStyle` or `RenderCursorGhostStyle`); both paint tail → head so the newest part stays on top at self-crossings.
 6. `RenderToggleEffect` — optional enable/disable hotkey circle (2px outline, centered on the trail head, follows the cursor).
 7. `DrawDebug` — optional white/red outline boxes plus a green trail-start marker.
 8. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.

@@ -2091,7 +2091,9 @@ void RenderSimpleLineStyle(const std::vector<D2D1_POINT_2F>& smoothed) {
     }
 
     size_t segCount = smoothed.size() - 1;
-    for (size_t i = 0; i < segCount; ++i) {
+    // Paint tail -> head so the newest segment is drawn last and stays on top
+    // wherever the trail crosses itself.
+    for (size_t i = segCount; i-- > 0;) {
         float ratio = (segCount > 1) ? (float)i / (float)(segCount - 1) : 0.0f;
         float alpha = InterpolateOpacity(ratio);
         float strokeWidth = InterpolateValues(settings.simpleLineWidths, ratio);
@@ -2117,7 +2119,9 @@ void RenderCursorGhostStyle(const std::vector<D2D1_POINT_2F>& smoothed,
     if (!render.pDCRenderTarget) return;
 
     size_t n = smoothed.size();
-    for (size_t i = 0; i < n; ++i) {
+    // Paint tail -> head so the newest copy is drawn last and stays on top
+    // wherever the trail crosses itself.
+    for (size_t i = n; i-- > 0;) {
         HCURSOR h = (i < cursors.size()) ? cursors[i] : NULL;
 
         CursorGeom g;
