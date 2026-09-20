@@ -1,26 +1,446 @@
 # WindHawk - Cursor Trail
 
-A [Windhawk](https://windhawk.net) mod that renders a customizable cursor trail overlay on the Windows desktop using Direct2D.  
-<img alt="matrix" src="https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d" />  
+A fully customizable cursor trail overlay for the Windows desktop.
 
-  
-## Styles
+![Cursor trail](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-- **Simple line** — A thin polyline with configurable width, color(s), gradient stops, and per-segment opacity.
-- **Cursor ghost** — Faded copies of the cursor image. Each copy is latched at the screen position where it was spawned and never moves; it only fades/expires. Each copy also keeps the exact cursor image from when it was sampled, so an image change (e.g. arrow to I-beam) appears gradually along the trail.
+## The two styles
 
-## How it works
+- **Simple line** — a polyline that follows the cursor; its width, color, and
+  opacity can change from head to tail.
+- **Cursor ghost** — faded copies of the cursor image, each latched at the spot
+  where it spawned (they stay put and only fade out). Each copy keeps the exact
+  cursor image from when it was sampled, so an image change (e.g. arrow to
+  I-beam) appears gradually along the trail.
 
-- A high-frequency polling thread samples cursor position every 1 ms.
-- A render thread draws sampled points via a layered (`WS_EX_LAYERED`) topmost transparent window, using Direct2D with per-pixel alpha via `UpdateLayeredWindow`.
-- For the line style, point positions are spatially decimated and smoothed with Chaikin subdivision before rendering. For the ghost style, the poll thread only pushes a sample once the cursor has travelled the configured spawn distance, so each copy is latched at a fixed screen position; the renderer draws them without further decimation.
-- Trail segments automatically expire after the configured tail duration. The overlay is paused when a fullscreen exclusive (game) application is detected.
-- On Windows 11 the overlay cannot cover the taskbar or Start menu by itself: since Windows 8, windows live in fixed Z-order bands (`ZBID`), and the taskbar (`ZBID_IMMERSIVE_MOGO`, 6) and Start menu sit in bands above the desktop band (1) regardless of `WS_EX_TOPMOST`. The optional **Cursor trail helper - always on top** companion mod (see below) moves the overlay into `ZBID_SYSTEM_TOOLS` (16) so it draws above them.
-- When the cursor is hidden (e.g. Windows' hide-while-typing), the trail fades out over the tail duration in both trail modes.
+## Features
+
+- **Time based** vs **Size based** trails.
+- **Timing** — tail duration and inactivity timeout.
+- **Size** — stroke width (Simple line) and copy size (Cursor ghost).
+- **Color** — head-to-tail gradients, blend width, interpolation, and ghost
+  recoloring.
+- **Hotkey** — toggle the trail on/off with a customizable global hotkey.
+
+## Settings
+
+### Style
+
+**`style`** — Rendering style: Simple line or Cursor ghost.
+
+`simple_line`
+
+![style = simple_line](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`cursor_ghost`
+
+![style = cursor_ghost](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+### Simple line options
+
+**`simpleLineOptions.trail_mode`** — `time_based` or `size_based`: how the trail expires.
+
+`time_based`
+
+![simpleLineOptions.trail_mode = time_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`size_based`
+
+![simpleLineOptions.trail_mode = size_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`simpleLineOptions.timeBased.tail_duration`** — Milliseconds each trail segment stays visible (min 20).
+
+`300`
+
+![simpleLineOptions.timeBased.tail_duration = 300](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`1000`
+
+![simpleLineOptions.timeBased.tail_duration = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`2000`
+
+![simpleLineOptions.timeBased.tail_duration = 2000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`simpleLineOptions.sizeBased.tail_size`** — Total trail length in pixels (min 20).
+
+`500`
+
+![simpleLineOptions.sizeBased.tail_size = 500](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`1500`
+
+![simpleLineOptions.sizeBased.tail_size = 1500](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`3000`
+
+![simpleLineOptions.sizeBased.tail_size = 3000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`simpleLineOptions.sizeBased.timeout`** — Milliseconds of inactivity before the trail fades, using the Time based duration (0 = disabled).
+
+`0`
+
+![simpleLineOptions.sizeBased.timeout = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`1000`
+
+![simpleLineOptions.sizeBased.timeout = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`5000`
+
+![simpleLineOptions.sizeBased.timeout = 5000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`simpleLineOptions.width.values`** — Comma-separated stroke widths from head to tail. Each value gets an equal share; repeat to widen (e.g. `2,2,2,2,1`).
+
+`3`
+
+![simpleLineOptions.width.values = 3](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`5,1`
+
+![simpleLineOptions.width.values = 5,1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`10,1,10,1`
+
+![simpleLineOptions.width.values = 10,1,10,1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`simpleLineOptions.color.values`** — Hex color(s) (`RRGGBB`) for the line; a list makes a head-to-tail gradient. Invalid entries fall back to black.
+
+`FF0000`
+
+![simpleLineOptions.color.values = FF0000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`00A2FF,8B00FF`
+
+![simpleLineOptions.color.values = 00A2FF,8B00FF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`000000,FF0000,FFFFFF`
+
+![simpleLineOptions.color.values = 000000,FF0000,FFFFFF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`simpleLineOptions.color.blend_width`** — 0–100: how much of each transition blends (0 = hard bands, 100 = full gradient).
+
+`0`
+
+![simpleLineOptions.color.blend_width = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`50`
+
+![simpleLineOptions.color.blend_width = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`100`
+
+![simpleLineOptions.color.blend_width = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`simpleLineOptions.color.interpolation`** — Blending curve: `linear`, `smoothstep`, `ease_in`, `ease_out`.
+
+`linear`
+
+![simpleLineOptions.color.interpolation = linear](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`smoothstep`
+
+![simpleLineOptions.color.interpolation = smoothstep](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`ease_in`
+
+![simpleLineOptions.color.interpolation = ease_in](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`ease_out`
+
+![simpleLineOptions.color.interpolation = ease_out](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`simpleLineOptions.opacity.values`** — Comma-separated opacity percentages (0–100) from head to tail.
+
+`100`
+
+![simpleLineOptions.opacity.values = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`100,0`
+
+![simpleLineOptions.opacity.values = 100,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`100,0,100`
+
+![simpleLineOptions.opacity.values = 100,0,100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`simpleLineOptions.trail_origin_on_cursor_change`** — On cursor image change: `none` freezes the origin, `immediate` snaps, `smooth` glides there.
+
+`none`
+
+![simpleLineOptions.trail_origin_on_cursor_change = none](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`immediate`
+
+![simpleLineOptions.trail_origin_on_cursor_change = immediate](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`smooth`
+
+![simpleLineOptions.trail_origin_on_cursor_change = smooth](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`simpleLineOptions.antialiasing`** — Smooth the trail edges.
+
+`on`
+
+![simpleLineOptions.antialiasing = on](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`off`
+
+![simpleLineOptions.antialiasing = off](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+### Cursor ghost options
+
+**`ghostOptions.trail_mode`** — `time_based` or `size_based`: how the copies expire.
+
+`time_based`
+
+![ghostOptions.trail_mode = time_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`size_based`
+
+![ghostOptions.trail_mode = size_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`ghostOptions.timeBased.tail_duration`** — Milliseconds each cursor copy stays visible (min 20).
+
+`300`
+
+![ghostOptions.timeBased.tail_duration = 300](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`1000`
+
+![ghostOptions.timeBased.tail_duration = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`2000`
+
+![ghostOptions.timeBased.tail_duration = 2000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`ghostOptions.sizeBased.tail_size`** — Number of cursor copies in the trail (min 2, max 512).
+
+`5`
+
+![ghostOptions.sizeBased.tail_size = 5](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`20`
+
+![ghostOptions.sizeBased.tail_size = 20](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`50`
+
+![ghostOptions.sizeBased.tail_size = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`ghostOptions.sizeBased.timeout`** — Milliseconds of inactivity before the copies fade, using the Time based duration (0 = disabled).
+
+`0`
+
+![ghostOptions.sizeBased.timeout = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`1000`
+
+![ghostOptions.sizeBased.timeout = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`5000`
+
+![ghostOptions.sizeBased.timeout = 5000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`ghostOptions.spacing`** — Extra distance in pixels between copies (0 = automatic, based on the copy count; max 200).
+
+`0`
+
+![ghostOptions.spacing = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`10`
+
+![ghostOptions.spacing = 10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`40`
+
+![ghostOptions.spacing = 40](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`ghostOptions.size.values`** — Comma-separated size multipliers from head to tail (1 = same, 0.8 = 80%). Avoid values above 1 (upscaled copies look pixelated).
+
+`1`
+
+![ghostOptions.size.values = 1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`1,0`
+
+![ghostOptions.size.values = 1,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`0.5,1`
+
+![ghostOptions.size.values = 0.5,1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`1,0.5,1,0.5`
+
+![ghostOptions.size.values = 1,0.5,1,0.5](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`ghostOptions.opacity.values`** — Comma-separated opacity percentages (0–100) from head to tail.
+
+`100`
+
+![ghostOptions.opacity.values = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`100,0`
+
+![ghostOptions.opacity.values = 100,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`100,20,100,20`
+
+![ghostOptions.opacity.values = 100,20,100,20](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`ghostOptions.color.values`** — Empty keeps the cursor's own colors; otherwise hex color(s) to recolor the pixels selected by Replace.
+
+`(empty)`
+
+![ghostOptions.color.values = empty](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`FFFFFF`
+
+![ghostOptions.color.values = FFFFFF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`00A2FF,8B00FF`
+
+![ghostOptions.color.values = 00A2FF,8B00FF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`ghostOptions.color.blend_width`** — 0–100: how much of each transition blends (0 = hard bands, 100 = full gradient).
+
+`0`
+
+![ghostOptions.color.blend_width = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`50`
+
+![ghostOptions.color.blend_width = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`100`
+
+![ghostOptions.color.blend_width = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`ghostOptions.color.interpolation`** — Blending curve: `linear`, `smoothstep`, `ease_in`, `ease_out`.
+
+`linear`
+
+![ghostOptions.color.interpolation = linear](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`smoothstep`
+
+![ghostOptions.color.interpolation = smoothstep](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`ease_in`
+
+![ghostOptions.color.interpolation = ease_in](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`ease_out`
+
+![ghostOptions.color.interpolation = ease_out](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`ghostOptions.color.replace.mode`** — Pixels to recolor: `auto` (enclosed center color), `custom` (the Custom color), or `whole` (every non-transparent pixel).
+
+`auto`
+
+![ghostOptions.color.replace.mode = auto](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`custom`
+
+![ghostOptions.color.replace.mode = custom](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`whole`
+
+![ghostOptions.color.replace.mode = whole](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`ghostOptions.color.replace.custom`** — Original cursor color to swap for `color.values` when mode is `custom` (e.g. `000000` for a black body).
+
+`FFFFFF`
+
+![ghostOptions.color.replace.custom = FFFFFF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`000000`
+
+![ghostOptions.color.replace.custom = 000000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`808080`
+
+![ghostOptions.color.replace.custom = 808080](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+### Enable/disable hotkey
+
+**`hotkeyOptions.key`** — Global hotkey that toggles the trail on/off. Format `Modifier+Key`; at least one modifier (Ctrl, Alt, Shift, Win) is required. Empty disables the hotkey.
+
+`(empty)`
+
+![hotkeyOptions.key = empty](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`Ctrl+Alt+T`
+
+![hotkeyOptions.key = Ctrl+Alt+T](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`hotkeyOptions.animate`** — Show a circle animation when the hotkey toggles the trail.
+
+`on`
+
+![hotkeyOptions.animate = on](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`off`
+
+![hotkeyOptions.animate = off](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+The animation is a circle outline (2px, in the cursor's color, centered on the trail start and following the cursor): it grows and fades out when disabling, and shrinks and fades in when enabling.
+
+`toggle effect`
+
+![hotkey toggle effect](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+### Trail offset
+
+**`tail_offset.x`** — Horizontal nudge of the trail origin in pixels (0 = auto-centered).
+
+`-10`
+
+![tail_offset.x = -10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`0`
+
+![tail_offset.x = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`+10`
+
+![tail_offset.x = +10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+**`tail_offset.y`** — Vertical nudge of the trail origin in pixels (0 = auto-centered).
+
+`-10`
+
+![tail_offset.y = -10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`0`
+
+![tail_offset.y = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`+10`
+
+![tail_offset.y = +10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+### Debug
+
+**`debug.show_outline`** — Draw white (bitmap bounds) and red (visible pixels) outline boxes plus a green `+` at the trail start.
+
+`off`
+
+![debug.show_outline = off](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`on`
+
+![debug.show_outline = on](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+## Above the taskbar and Start menu
+
+On Windows 11 the trail is drawn under the taskbar and Start menu. Install
+the companion **Cursor trail helper - always on top** mod to lift it above
+both (it needs a one-time Win-key press).
 
 ## Architecture
 
-The main mod is a single translation unit (`CursorTrail.cpp`); the optional always-on-top helper (see [Above the taskbar](#above-the-taskbar-companion-mod)) is a separate mod in `CursorTrailBand.cpp`. This section describes the main mod. All state is file-scope, grouped into five struct instances:
+The main mod is a single translation unit (`CursorTrail.cpp`); the optional always-on-top helper (see [Above the taskbar](#above-the-taskbar-and-start-menu)) is a separate mod in `CursorTrailHelperAlwaysOnTop.cpp`. This section describes the main mod. All state is file-scope, grouped into five struct instances:
 
 | Instance | Type | Purpose |
 |---|---|---|
@@ -74,84 +494,3 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 - `WhTool_ModUninit` — signals the poll thread, kills the timer, and posts `WM_QUIT`.
 - The overlay thread registers the `hotkeyOptions.key` setting (`ApplyHotkey`) right after creating the window and unregisters it before destroying the window. `WM_HOTKEY` flips `runtime.trailEnabled`, which suppresses sampling/rendering like the fullscreen-game path does, and (when `hotkeyOptions.animate` is on) calls `StartToggleEffect` to play the circle animation centered on the trail head (disable: grows + fades out, ease in; enable: shrinks + fades in, ease out; 400 ms, 2px outline, diameter 6× the cursor, colored by `GetCursorColor`'s ghost-`auto` pick, following the cursor).
 - The `Wh_ModInit` / `Wh_ModAfterInit` / `Wh_ModUninit` block at the bottom of the file is Windhawk's tool-mod launcher boilerplate and should be left as-is.
-
-## Settings
-
-### Style
-
-| Setting | Description |
-|---|---|
-| `style` | Rendering style: `simple_line` or `cursor_ghost` |
-
-### Simple line options
-
-| Setting | Description |
-|---|---|
-| `simpleLineOptions.trail_mode` | `time_based` (default) or `size_based` — how the trail expires |
-| `simpleLineOptions.timeBased.tail_duration` | Milliseconds each trail segment stays visible (min 20) |
-| `simpleLineOptions.sizeBased.tail_size` | Total trail length in pixels — eviction walks from head and drops points past this distance (min 20) |
-| `simpleLineOptions.sizeBased.timeout` | Milliseconds of inactivity before trail fades using Time based duration (0 = disabled) |
-| `simpleLineOptions.width.values` | Comma-separated stroke widths. Each value gets an equal share; repeat to widen (e.g. "2,2,2,2,1") |
-| `simpleLineOptions.color.values` | Hex color(s) for the line (comma-separated), each gets equal share |
-| `simpleLineOptions.color.blend_width` | 0-100: how much of each transition blends (0 = hard bands, 100 = full gradient) |
-| `simpleLineOptions.color.interpolation` | Blending curve: linear, smoothstep, ease_in, ease_out |
-| `simpleLineOptions.opacity.values` | Comma-separated opacity percentages (0-100), each gets equal share |
-| `simpleLineOptions.trail_origin_on_cursor_change` | Behavior when the cursor image changes: `smooth` (default) glides to the new cursor center with an ease-in-out transition; `none` keeps the origin frozen; `immediate` snaps |
-| `simpleLineOptions.antialiasing` | Switch (default on) — smooth trail edges or hard, pixelated edges |
-
-### Cursor ghost options
-
-| Setting | Description |
-|---|---|
-| `ghostOptions.trail_mode` | `time_based` (default) or `size_based` — how the copies expire |
-| `ghostOptions.timeBased.tail_duration` | Milliseconds each cursor copy stays visible (min 20) |
-| `ghostOptions.sizeBased.tail_size` | Number of cursor copies in the trail, size-based mode (min 2, max 512) |
-| `ghostOptions.sizeBased.timeout` | Milliseconds of inactivity before the copies fade using the Time based tail duration (0 = disabled) |
-| `ghostOptions.spacing` | Extra distance in pixels added between cursor copies. A new copy is stamped each time the cursor travels this gap (0 = automatic, based on the copy count; max 200). |
-| `ghostOptions.size.values` | Comma-separated size multipliers from head to tail (1 = same size, 0.8 = 80%, 2 = twice). Each value gets an equal share; repeat to widen. Avoid values above 1 (upscaled copies look pixelated); use the Windows cursor size setting to enlarge the cursor |
-| `ghostOptions.opacity.values` | Comma-separated opacity percentages (0-100) from head to tail, each gets equal share |
-| `ghostOptions.color.values` | Hex color(s) for the cursor copies (comma-separated), each gets equal share. Empty (default) keeps the cursor's own colors; otherwise pixels matching the Replace color are recolored to this value |
-| `ghostOptions.color.blend_width` | 0-100: how much of each transition blends (0 = hard bands, 100 = full gradient) |
-| `ghostOptions.color.interpolation` | Blending curve: linear, smoothstep, ease_in, ease_out |
-| `ghostOptions.color.replace.mode` | Which pixels to recolor: `auto` (default, the cursor's enclosed center color — ignores the outline; falls back to the largest area if nothing is enclosed), `custom` (the `color.replace.custom` color), or `whole` (every non-transparent pixel) |
-| `ghostOptions.color.replace.custom` | Original cursor color to swap for `color.values` when mode is `custom` (default `FFFFFF`, e.g. the white outline). Set `000000` to recolor a black cursor body |
-
-### Enable/disable hotkey
-
-| Setting | Description |
-|---|---|
-| `hotkeyOptions.key` | Global hotkey that toggles the trail on/off, e.g. `Ctrl+Alt+T`. At least one modifier (Ctrl/Alt/Shift/Win) is required; empty (default) disables the hotkey. Registered on the overlay window via `RegisterHotKey` (with `MOD_NOREPEAT`), so it fails silently if another app already owns the combo. |
-| `hotkeyOptions.animate` | Switch (default on) — play the circle animation when the hotkey toggles the trail. |
-
-### Trail offset
-
-| Setting | Description |
-|---|---|
-| `tail_offset.x` | Horizontal nudge of the trail origin in pixels (0 = auto-centered) |
-| `tail_offset.y` | Vertical nudge of the trail origin in pixels (0 = auto-centered) |
-
-### Debug
-
-| Setting | Description |
-|---|---|
-| `debug.show_outline` | `False` (default) — draw white (bitmap bounds) and red (visible pixels) outline boxes around the cursor, plus a green `+` at the trail start |
-
-## Above the taskbar (companion mod)
-
-The trail is a normal desktop-band window, so on Windows 11 it is drawn *under* the taskbar and Start menu. To lift it above them, install the companion **Cursor trail helper - always on top** mod (`CursorTrailBand.cpp`, mod id `cursor-trail-helper-always-on-top`) alongside this one.
-
-- It is injected into `explorer.exe` and moves the overlay to `ZBID_SYSTEM_TOOLS` (16) — the same band Task Manager's "Always on top" uses — via the undocumented `SetWindowBand` API.
-- It finds the overlay by its window class name (`SmearFrameOverlayClass`), so the two mods have no runtime coupling other than that name.
-- If direct banding is denied, it captures the IAM access key by hooking `NtUserEnableIAMAccess`; that requires pressing the **Win key** (or opening a shell surface) once after load.
-- Caveats: undocumented APIs; the trail then also draws above Task Manager and Alt-Tab (it stays click-through). Enable/disable it independently of the main mod.
-
-## Building
-
-Requires the Windhawk SDK. Link against `d2d1`, `ole32`, `gdi32`, `shell32`, `windowscodecs`, `winmm`, and `shcore`.
-
-```
-# From the Windhawk mod directory:
-cl /EHsc /O2 CursorTrail.cpp /link d2d1.lib ole32.lib gdi32.lib shell32.lib windowscodecs.lib winmm.lib shcore.lib
-```
-
-The always-on-top helper (`CursorTrailBand.cpp`) needs no extra libraries.

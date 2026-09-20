@@ -1,5 +1,6 @@
 - Always read README.md at the start of each session.
 - Always be concise.
 - After any code change, consider whether the README and description need updating.
+- Keep README.md and the mod description (the `==WindhawkModReadme==` block in CursorTrail.cpp) always in sync: they must contain identical markdown.
 - When the user says "bump" or "bump version", increment the version number and update CHANGELOG.md.
 - Never try to compile or build the project; the toolchain is not set up on this machine.
