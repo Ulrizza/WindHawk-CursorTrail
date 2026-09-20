@@ -2,7 +2,7 @@
 // @id              cursor-trail
 // @name            Cursor trail
 // @description     A fully customizable cursor trail overlay for the Windows desktop.
-// @version         0.16
+// @version         0.17
 // @author          Ulrizza
 // @license         MIT
 // @include         windhawk.exe

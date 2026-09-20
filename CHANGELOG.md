@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.17
 - Settings UX pass before release:
   - `simpleLineOptions.antialiasing` is now a boolean switch instead of a True/False dropdown.
   - Fixed `%%` rendering literally in the Width and Size descriptions (now `%`).
