@@ -1,8 +1,6 @@
 # WindHawk - Cursor Trail
 
-A fully customizable cursor trail overlay for the Windows desktop.
-
-![Cursor trail](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+A fully customizable cursor trail for the Windows desktop.  
 
 ## The two styles
 
@@ -26,43 +24,38 @@ A fully customizable cursor trail overlay for the Windows desktop.
 
 ### Style
 
-**`style`** — Rendering style: Simple line or Cursor ghost.
+Rendering style.
 
-`simple_line`
+`style: simple_line`  
+![style = cursor_ghost](./Gifs/style%20simple%20line%20default.gif)
 
-![style = simple_line](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`cursor_ghost`
-
-![style = cursor_ghost](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`style: cursor_ghost`  
+![style = simple_line](./Gifs/style%20ghost%20default.gif)
 
 ### Simple line options
 
-**`simpleLineOptions.trail_mode`** — `time_based` or `size_based`: how the trail expires.
+How the trail expires.
 
-`time_based`
+`simpleLineOptions.trail_mode: time_based`  
+![style = cursor_ghost](./Gifs/style%20simple%20line%20default.gif)
 
-![simpleLineOptions.trail_mode = time_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`size_based`
-
+`simpleLineOptions.trail_mode: size_based`  
 ![simpleLineOptions.trail_mode = size_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-**`simpleLineOptions.timeBased.tail_duration`** — Milliseconds each trail segment stays visible (min 20).
+`simpleLineOptions.timeBased.tail_duration`  
+Milliseconds each trail segment stays visible (min 20).
 
-`300`
-
+`300`  
 ![simpleLineOptions.timeBased.tail_duration = 300](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`1000`
-
+`1000`  
 ![simpleLineOptions.timeBased.tail_duration = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`2000`
-
+`2000`  
 ![simpleLineOptions.timeBased.tail_duration = 2000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-**`simpleLineOptions.sizeBased.tail_size`** — Total trail length in pixels (min 20).
+`simpleLineOptions.sizeBased.tail_size`  
+Total trail length in pixels (min 20).
 
 `500`
 
