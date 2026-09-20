@@ -37,37 +37,9 @@ A fully customizable cursor trail overlay for the Windows desktop.
 
 ## Settings
 
-### Enable/disable hotkey
-
-**`hotkeyOptions.key`** — default *(empty)*. Global hotkey that toggles the trail on/off. Format `Modifier+Key`; at least one modifier (Ctrl, Alt, Shift, Win) is required. Empty disables the hotkey.
-
-`(empty)`
-
-![hotkeyOptions.key = empty](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.key.empty.gif)
-
-`Ctrl+Alt+T`
-
-![hotkeyOptions.key = Ctrl+Alt+T](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.key.Ctrl+Alt+T.gif)
-
-**`hotkeyOptions.animate`** — default `true`. Show a circle animation when the hotkey toggles the trail.
-
-`on`
-
-![hotkeyOptions.animate = on](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.animate.on.gif)
-
-`off`
-
-![hotkeyOptions.animate = off](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.animate.off.gif)
-
-The animation is a circle outline (2px, in the cursor's color, centered on the trail start and following the cursor): it grows and fades out when disabling, and shrinks and fades in when enabling.
-
-`toggle effect`
-
-![hotkey toggle effect](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.animate.toggle.gif)
-
 ### Style
 
-**`style`** — default `simple_line`. Rendering style: Simple line or Cursor ghost.
+**`style`** — Rendering style: Simple line or Cursor ghost.
 
 `simple_line`
 
@@ -79,7 +51,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ### Simple line options
 
-**`simpleLineOptions.trail_mode`** — default `time_based`. `time_based` or `size_based`: how the trail expires.
+**`simpleLineOptions.trail_mode`** — `time_based` or `size_based`: how the trail expires.
 
 `time_based`
 
@@ -89,7 +61,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![simpleLineOptions.trail_mode = size_based](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.trail_mode.size_based.gif)
 
-**`simpleLineOptions.timeBased.tail_duration`** — default `500`. Milliseconds each trail segment stays visible (min 20).
+**`simpleLineOptions.timeBased.tail_duration`** — Milliseconds each trail segment stays visible (min 20).
 
 `300`
 
@@ -103,7 +75,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![simpleLineOptions.timeBased.tail_duration = 2000](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.timeBased.tail_duration.2000.gif)
 
-**`simpleLineOptions.sizeBased.tail_size`** — default `2000`. Total trail length in pixels (min 20).
+**`simpleLineOptions.sizeBased.tail_size`** — Total trail length in pixels (min 20).
 
 `500`
 
@@ -117,7 +89,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![simpleLineOptions.sizeBased.tail_size = 3000](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.sizeBased.tail_size.3000.gif)
 
-**`simpleLineOptions.sizeBased.timeout`** — default `2000`. Milliseconds of inactivity before the trail fades, using the Time based duration (0 = disabled).
+**`simpleLineOptions.sizeBased.timeout`** — Milliseconds of inactivity before the trail fades, using the Time based duration (0 = disabled).
 
 `0`
 
@@ -131,7 +103,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![simpleLineOptions.sizeBased.timeout = 5000](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.sizeBased.timeout.5000.gif)
 
-**`simpleLineOptions.width.values`** — default `2,1`. Comma-separated stroke widths from head to tail. Each value gets an equal share; repeat to widen (e.g. `2,2,2,2,1`).
+**`simpleLineOptions.width.values`** — Comma-separated stroke widths from head to tail. Each value gets an equal share; repeat to widen (e.g. `2,2,2,2,1`).
 
 `3`
 
@@ -145,7 +117,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![simpleLineOptions.width.values = 10,1,10,1](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.width.values.pulse.gif)
 
-**`simpleLineOptions.color.values`** — default `00A2FF,8B00FF`. Hex color(s) (`RRGGBB`) for the line; a list makes a head-to-tail gradient. Invalid entries fall back to black.
+**`simpleLineOptions.color.values`** — Hex color(s) (`RRGGBB`) for the line; a list makes a head-to-tail gradient. Invalid entries fall back to black.
 
 `FF0000`
 
@@ -159,7 +131,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![simpleLineOptions.color.values = 000000,FF0000,FFFFFF](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.values.multi.gif)
 
-**`simpleLineOptions.color.blend_width`** — default `100`. 0–100: how much of each transition blends (0 = hard bands, 100 = full gradient).
+**`simpleLineOptions.color.blend_width`** — 0–100: how much of each transition blends (0 = hard bands, 100 = full gradient).
 
 `0`
 
@@ -173,7 +145,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![simpleLineOptions.color.blend_width = 100](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.blend_width.100.gif)
 
-**`simpleLineOptions.color.interpolation`** — default `smoothstep`. Blending curve: `linear`, `smoothstep`, `ease_in`, `ease_out`.
+**`simpleLineOptions.color.interpolation`** — Blending curve: `linear`, `smoothstep`, `ease_in`, `ease_out`.
 
 `linear`
 
@@ -191,7 +163,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![simpleLineOptions.color.interpolation = ease_out](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.color.interpolation.ease_out.gif)
 
-**`simpleLineOptions.opacity.values`** — default `100,80`. Comma-separated opacity percentages (0–100) from head to tail.
+**`simpleLineOptions.opacity.values`** — Comma-separated opacity percentages (0–100) from head to tail.
 
 `100`
 
@@ -205,7 +177,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![simpleLineOptions.opacity.values = 100,0,100](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.opacity.values.pulse.gif)
 
-**`simpleLineOptions.trail_origin_on_cursor_change`** — default `smooth`. On cursor image change: `none` freezes the origin, `immediate` snaps, `smooth` glides there.
+**`simpleLineOptions.trail_origin_on_cursor_change`** — On cursor image change: `none` freezes the origin, `immediate` snaps, `smooth` glides there.
 
 `none`
 
@@ -219,7 +191,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![simpleLineOptions.trail_origin_on_cursor_change = smooth](https://raw.githubusercontent.com/user/repo/main/gifs/simpleLineOptions.trail_origin_on_cursor_change.smooth.gif)
 
-**`simpleLineOptions.antialiasing`** — default `true`. Smooth the trail edges.
+**`simpleLineOptions.antialiasing`** — Smooth the trail edges.
 
 `on`
 
@@ -231,7 +203,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ### Cursor ghost options
 
-**`ghostOptions.trail_mode`** — default `time_based`. `time_based` or `size_based`: how the copies expire.
+**`ghostOptions.trail_mode`** — `time_based` or `size_based`: how the copies expire.
 
 `time_based`
 
@@ -241,7 +213,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![ghostOptions.trail_mode = size_based](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.trail_mode.size_based.gif)
 
-**`ghostOptions.timeBased.tail_duration`** — default `500`. Milliseconds each cursor copy stays visible (min 20).
+**`ghostOptions.timeBased.tail_duration`** — Milliseconds each cursor copy stays visible (min 20).
 
 `300`
 
@@ -255,7 +227,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![ghostOptions.timeBased.tail_duration = 2000](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.timeBased.tail_duration.2000.gif)
 
-**`ghostOptions.sizeBased.tail_size`** — default `20`. Number of cursor copies in the trail (min 2, max 512).
+**`ghostOptions.sizeBased.tail_size`** — Number of cursor copies in the trail (min 2, max 512).
 
 `5`
 
@@ -269,7 +241,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![ghostOptions.sizeBased.tail_size = 50](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.sizeBased.tail_size.50.gif)
 
-**`ghostOptions.sizeBased.timeout`** — default `2000`. Milliseconds of inactivity before the copies fade, using the Time based duration (0 = disabled).
+**`ghostOptions.sizeBased.timeout`** — Milliseconds of inactivity before the copies fade, using the Time based duration (0 = disabled).
 
 `0`
 
@@ -283,7 +255,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![ghostOptions.sizeBased.timeout = 5000](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.sizeBased.timeout.5000.gif)
 
-**`ghostOptions.spacing`** — default `10`. Extra distance in pixels between copies (0 = automatic, based on the copy count; max 200).
+**`ghostOptions.spacing`** — Extra distance in pixels between copies (0 = automatic, based on the copy count; max 200).
 
 `0`
 
@@ -297,7 +269,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![ghostOptions.spacing = 40](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.spacing.40.gif)
 
-**`ghostOptions.size.values`** — default `1,0`. Comma-separated size multipliers from head to tail (1 = same, 0.8 = 80%). Avoid values above 1 (upscaled copies look pixelated).
+**`ghostOptions.size.values`** — Comma-separated size multipliers from head to tail (1 = same, 0.8 = 80%). Avoid values above 1 (upscaled copies look pixelated).
 
 `1`
 
@@ -315,7 +287,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![ghostOptions.size.values = 1,0.5,1,0.5](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.size.values.pulse.gif)
 
-**`ghostOptions.opacity.values`** — default `100,20`. Comma-separated opacity percentages (0–100) from head to tail.
+**`ghostOptions.opacity.values`** — Comma-separated opacity percentages (0–100) from head to tail.
 
 `100`
 
@@ -329,7 +301,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![ghostOptions.opacity.values = 100,20,100,20](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.opacity.values.pulse.gif)
 
-**`ghostOptions.color.values`** — default *(empty)*. Empty keeps the cursor's own colors; otherwise hex color(s) to recolor the pixels selected by Replace.
+**`ghostOptions.color.values`** — Empty keeps the cursor's own colors; otherwise hex color(s) to recolor the pixels selected by Replace.
 
 `(empty)`
 
@@ -343,7 +315,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![ghostOptions.color.values = 00A2FF,8B00FF](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.values.gradient.gif)
 
-**`ghostOptions.color.blend_width`** — default `100`. 0–100: how much of each transition blends (0 = hard bands, 100 = full gradient).
+**`ghostOptions.color.blend_width`** — 0–100: how much of each transition blends (0 = hard bands, 100 = full gradient).
 
 `0`
 
@@ -357,7 +329,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![ghostOptions.color.blend_width = 100](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.blend_width.100.gif)
 
-**`ghostOptions.color.interpolation`** — default `smoothstep`. Blending curve: `linear`, `smoothstep`, `ease_in`, `ease_out`.
+**`ghostOptions.color.interpolation`** — Blending curve: `linear`, `smoothstep`, `ease_in`, `ease_out`.
 
 `linear`
 
@@ -375,7 +347,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![ghostOptions.color.interpolation = ease_out](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.interpolation.ease_out.gif)
 
-**`ghostOptions.color.replace.mode`** — default `auto`. Pixels to recolor: `auto` (enclosed center color), `custom` (the Custom color), or `whole` (every non-transparent pixel).
+**`ghostOptions.color.replace.mode`** — Pixels to recolor: `auto` (enclosed center color), `custom` (the Custom color), or `whole` (every non-transparent pixel).
 
 `auto`
 
@@ -389,7 +361,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![ghostOptions.color.replace.mode = whole](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.replace.mode.whole.gif)
 
-**`ghostOptions.color.replace.custom`** — default `FFFFFF`. Original cursor color to swap for `color.values` when mode is `custom` (e.g. `000000` for a black body).
+**`ghostOptions.color.replace.custom`** — Original cursor color to swap for `color.values` when mode is `custom` (e.g. `000000` for a black body).
 
 `FFFFFF`
 
@@ -403,9 +375,37 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![ghostOptions.color.replace.custom = 808080](https://raw.githubusercontent.com/user/repo/main/gifs/ghostOptions.color.replace.custom.808080.gif)
 
-### Common
+### Enable/disable hotkey
 
-**`tail_offset.x`** — default `0`. Horizontal nudge of the trail origin in pixels (0 = auto-centered).
+**`hotkeyOptions.key`** — Global hotkey that toggles the trail on/off. Format `Modifier+Key`; at least one modifier (Ctrl, Alt, Shift, Win) is required. Empty disables the hotkey.
+
+`(empty)`
+
+![hotkeyOptions.key = empty](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.key.empty.gif)
+
+`Ctrl+Alt+T`
+
+![hotkeyOptions.key = Ctrl+Alt+T](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.key.Ctrl+Alt+T.gif)
+
+**`hotkeyOptions.animate`** — Show a circle animation when the hotkey toggles the trail.
+
+`on`
+
+![hotkeyOptions.animate = on](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.animate.on.gif)
+
+`off`
+
+![hotkeyOptions.animate = off](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.animate.off.gif)
+
+The animation is a circle outline (2px, in the cursor's color, centered on the trail start and following the cursor): it grows and fades out when disabling, and shrinks and fades in when enabling.
+
+`toggle effect`
+
+![hotkey toggle effect](https://raw.githubusercontent.com/user/repo/main/gifs/hotkeyOptions.animate.toggle.gif)
+
+### Trail offset
+
+**`tail_offset.x`** — Horizontal nudge of the trail origin in pixels (0 = auto-centered).
 
 `-10`
 
@@ -419,7 +419,7 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![tail_offset.x = +10](https://raw.githubusercontent.com/user/repo/main/gifs/tail_offset.x.pos10.gif)
 
-**`tail_offset.y`** — default `0`. Vertical nudge of the trail origin in pixels (0 = auto-centered).
+**`tail_offset.y`** — Vertical nudge of the trail origin in pixels (0 = auto-centered).
 
 `-10`
 
@@ -433,7 +433,9 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 
 ![tail_offset.y = +10](https://raw.githubusercontent.com/user/repo/main/gifs/tail_offset.y.pos10.gif)
 
-**`debug.show_outline`** — default `false`. Draw white (bitmap bounds) and red (visible pixels) outline boxes plus a green `+` at the trail start.
+### Debug
+
+**`debug.show_outline`** — Draw white (bitmap bounds) and red (visible pixels) outline boxes plus a green `+` at the trail start.
 
 `off`
 
@@ -545,7 +547,7 @@ both (it needs a one-time Win-key press).
     - time_based: Time based
     - size_based: Size based
   - timeBased:
-    - tail_duration: 500
+    - tail_duration: 300
       $name: Tail duration
       $description: How long each cursor copy stays visible, in milliseconds. Minimum 20.
     $name: Time based
@@ -568,7 +570,7 @@ both (it needs a one-time Win-key press).
       $description: "Comma-separated size multipliers from head to tail (1 = same size, 0.8 = 80%, 2 = twice). Each value gets an equal share; repeat to widen (e.g. \"1,0.5,1,0.5\"). Avoid values above 1 (upscaled copies look pixelated); use the Windows cursor size setting to enlarge the cursor."
     $name: Size
   - opacity:
-    - values: "100,20"
+    - values: "50,20"
       $name: Values (head to tail)
       $description: Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade). Each value gets an equal share; repeat to widen.
     $name: Opacity

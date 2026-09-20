@@ -75,14 +75,17 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 
 ## Settings
 
+### Style
+
 | Setting | Description |
 |---|---|
 | `style` | Rendering style: `simple_line` or `cursor_ghost` |
-| `hotkeyOptions.key` | Global hotkey that toggles the trail on/off, e.g. `Ctrl+Alt+T`. At least one modifier (Ctrl/Alt/Shift/Win) is required; empty (default) disables the hotkey. Registered on the overlay window via `RegisterHotKey` (with `MOD_NOREPEAT`), so it fails silently if another app already owns the combo. |
-| `hotkeyOptions.animate` | Switch (default on) — play the circle animation when the hotkey toggles the trail. |
+
+### Simple line options
+
+| Setting | Description |
+|---|---|
 | `simpleLineOptions.trail_mode` | `time_based` (default) or `size_based` — how the trail expires |
-| `simpleLineOptions.antialiasing` | Switch (default on) — smooth trail edges or hard, pixelated edges |
-| `simpleLineOptions.trail_origin_on_cursor_change` | Behavior when the cursor image changes: `smooth` (default) glides to the new cursor center with an ease-in-out transition; `none` keeps the origin frozen; `immediate` snaps |
 | `simpleLineOptions.timeBased.tail_duration` | Milliseconds each trail segment stays visible (min 20) |
 | `simpleLineOptions.sizeBased.tail_size` | Total trail length in pixels — eviction walks from head and drops points past this distance (min 20) |
 | `simpleLineOptions.sizeBased.timeout` | Milliseconds of inactivity before trail fades using Time based duration (0 = disabled) |
@@ -91,6 +94,13 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 | `simpleLineOptions.color.blend_width` | 0-100: how much of each transition blends (0 = hard bands, 100 = full gradient) |
 | `simpleLineOptions.color.interpolation` | Blending curve: linear, smoothstep, ease_in, ease_out |
 | `simpleLineOptions.opacity.values` | Comma-separated opacity percentages (0-100), each gets equal share |
+| `simpleLineOptions.trail_origin_on_cursor_change` | Behavior when the cursor image changes: `smooth` (default) glides to the new cursor center with an ease-in-out transition; `none` keeps the origin frozen; `immediate` snaps |
+| `simpleLineOptions.antialiasing` | Switch (default on) — smooth trail edges or hard, pixelated edges |
+
+### Cursor ghost options
+
+| Setting | Description |
+|---|---|
 | `ghostOptions.trail_mode` | `time_based` (default) or `size_based` — how the copies expire |
 | `ghostOptions.timeBased.tail_duration` | Milliseconds each cursor copy stays visible (min 20) |
 | `ghostOptions.sizeBased.tail_size` | Number of cursor copies in the trail, size-based mode (min 2, max 512) |
@@ -99,12 +109,29 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 | `ghostOptions.size.values` | Comma-separated size multipliers from head to tail (1 = same size, 0.8 = 80%, 2 = twice). Each value gets an equal share; repeat to widen. Avoid values above 1 (upscaled copies look pixelated); use the Windows cursor size setting to enlarge the cursor |
 | `ghostOptions.opacity.values` | Comma-separated opacity percentages (0-100) from head to tail, each gets equal share |
 | `ghostOptions.color.values` | Hex color(s) for the cursor copies (comma-separated), each gets equal share. Empty (default) keeps the cursor's own colors; otherwise pixels matching the Replace color are recolored to this value |
-| `ghostOptions.color.replace.mode` | Which pixels to recolor: `auto` (default, the cursor's enclosed center color — ignores the outline; falls back to the largest area if nothing is enclosed), `custom` (the `color.replace.custom` color), or `whole` (every non-transparent pixel) |
-| `ghostOptions.color.replace.custom` | Original cursor color to swap for `color.values` when mode is `custom` (default `FFFFFF`, e.g. the white outline). Set `000000` to recolor a black cursor body |
 | `ghostOptions.color.blend_width` | 0-100: how much of each transition blends (0 = hard bands, 100 = full gradient) |
 | `ghostOptions.color.interpolation` | Blending curve: linear, smoothstep, ease_in, ease_out |
+| `ghostOptions.color.replace.mode` | Which pixels to recolor: `auto` (default, the cursor's enclosed center color — ignores the outline; falls back to the largest area if nothing is enclosed), `custom` (the `color.replace.custom` color), or `whole` (every non-transparent pixel) |
+| `ghostOptions.color.replace.custom` | Original cursor color to swap for `color.values` when mode is `custom` (default `FFFFFF`, e.g. the white outline). Set `000000` to recolor a black cursor body |
+
+### Enable/disable hotkey
+
+| Setting | Description |
+|---|---|
+| `hotkeyOptions.key` | Global hotkey that toggles the trail on/off, e.g. `Ctrl+Alt+T`. At least one modifier (Ctrl/Alt/Shift/Win) is required; empty (default) disables the hotkey. Registered on the overlay window via `RegisterHotKey` (with `MOD_NOREPEAT`), so it fails silently if another app already owns the combo. |
+| `hotkeyOptions.animate` | Switch (default on) — play the circle animation when the hotkey toggles the trail. |
+
+### Trail offset
+
+| Setting | Description |
+|---|---|
 | `tail_offset.x` | Horizontal nudge of the trail origin in pixels (0 = auto-centered) |
 | `tail_offset.y` | Vertical nudge of the trail origin in pixels (0 = auto-centered) |
+
+### Debug
+
+| Setting | Description |
+|---|---|
 | `debug.show_outline` | `False` (default) — draw white (bitmap bounds) and red (visible pixels) outline boxes around the cursor, plus a green `+` at the trail start |
 
 ## Above the taskbar (companion mod)
