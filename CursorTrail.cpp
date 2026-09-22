@@ -2,7 +2,7 @@
 // @id              cursor-trail
 // @name            Cursor trail
 // @description     A fully customizable cursor trail overlay for the Windows desktop.
-// @version         0.17
+// @version         0.18
 // @author          Ulrizza
 // @license         MIT
 // @include         windhawk.exe
@@ -13,15 +13,13 @@
 /*
 # WindHawk - Cursor Trail
 
-A fully customizable cursor trail overlay for the Windows desktop.
-
-![Cursor trail](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+A fully customizable cursor trail for the Windows desktop.  
 
 ## The two styles
 
-- **Simple line** — a polyline that follows the cursor; its width, color, and
+- **Simple line**: a polyline that follows the cursor; its width, color, and
   opacity can change from head to tail.
-- **Cursor ghost** — faded copies of the cursor image, each latched at the spot
+- **Cursor ghost**: faded copies of the cursor image, each latched at the spot
   where it spawned (they stay put and only fade out). Each copy keeps the exact
   cursor image from when it was sampled, so an image change (e.g. arrow to
   I-beam) appears gradually along the trail.
@@ -29,421 +27,317 @@ A fully customizable cursor trail overlay for the Windows desktop.
 ## Features
 
 - **Time based** vs **Size based** trails.
-- **Timing** — tail duration and inactivity timeout.
-- **Size** — stroke width (Simple line) and copy size (Cursor ghost).
-- **Color** — head-to-tail gradients, blend width, interpolation, and ghost
+- **Timing**: tail duration and inactivity timeout.
+- **Size**: stroke width (Simple line) and copy size (Cursor ghost).
+- **Color**: head-to-tail gradients, blend width, and ghost
   recoloring.
-- **Hotkey** — toggle the trail on/off with a customizable global hotkey.
+- **Hotkey**: toggle the trail on/off with a customizable global hotkey.
 
 ## Settings
 
 ### Style
 
-**`style`** — Rendering style: Simple line or Cursor ghost.
+Type of trail.
 
-`simple_line`
-
+`style: simple_line`: a line whose width, color, and opacity can change along its length  
 ![style = simple_line](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`cursor_ghost`
-
+`style: cursor_ghost`: faded copies of the cursor image, each latched where it spawned  
 ![style = cursor_ghost](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
 ### Simple line options
 
-**`simpleLineOptions.trail_mode`** — `time_based` or `size_based`: how the trail expires.
+Applies when Style is Simple line.
 
-`time_based`
+#### Trail mode
 
+How the trail disappears.
+
+`simpleLineOptions.trail_mode: time_based`: each part of the trail fades after the Tail duration  
 ![simpleLineOptions.trail_mode = time_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`size_based`
-
+`simpleLineOptions.trail_mode: size_based`: keeps a fixed trail length even when the cursor stops  
 ![simpleLineOptions.trail_mode = size_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-**`simpleLineOptions.timeBased.tail_duration`** — Milliseconds each trail segment stays visible (min 20).
+#### Time based
 
-`300`
+Applies when Trail mode is Time based.
 
+##### Tail duration
+
+How long each trail segment stays visible, in milliseconds. Minimum 20.
+
+`100`  
+![simpleLineOptions.timeBased.tail_duration = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`300`  
 ![simpleLineOptions.timeBased.tail_duration = 300](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`1000`
-
+`1000`  
 ![simpleLineOptions.timeBased.tail_duration = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`2000`
+#### Size based
 
-![simpleLineOptions.timeBased.tail_duration = 2000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+Applies when Trail mode is Size based.
 
-**`simpleLineOptions.sizeBased.tail_size`** — Total trail length in pixels (min 20).
+##### Tail length
 
-`500`
+Maximum trail length in pixels. Minimum 20.
 
+`100`  
+![simpleLineOptions.sizeBased.tail_size = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`500`  
 ![simpleLineOptions.sizeBased.tail_size = 500](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`1500`
+`1000`  
+![simpleLineOptions.sizeBased.tail_size = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-![simpleLineOptions.sizeBased.tail_size = 1500](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+##### Timeout
 
-`3000`
+Milliseconds of inactivity before the trail starts fading (using the Time based tail duration). 0 = trail always visible.
 
-![simpleLineOptions.sizeBased.tail_size = 3000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`simpleLineOptions.sizeBased.timeout`** — Milliseconds of inactivity before the trail fades, using the Time based duration (0 = disabled).
-
-`0`
-
+`0`  
 ![simpleLineOptions.sizeBased.timeout = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`1000`
+`500`  
+![simpleLineOptions.sizeBased.timeout = 500](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
+`1000`  
 ![simpleLineOptions.sizeBased.timeout = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`5000`
+#### Width
 
-![simpleLineOptions.sizeBased.timeout = 5000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+##### Values (head to tail)
 
-**`simpleLineOptions.width.values`** — Comma-separated stroke widths from head to tail. Each value gets an equal share; repeat to widen (e.g. `2,2,2,2,1`).
+Comma-separated stroke widths in pixels from head to tail (e.g. "2,1" for a tapered trail, or "10,1,10,1" for a pulsing trail). Each value gets an equal share; repeat to widen (e.g. "2,2,2,2,1" = 80% at 2, 20% at 1). Minimum 1.
 
-`3`
+`5`  
+![simpleLineOptions.width.values = 5](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-![simpleLineOptions.width.values = 3](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`5,0`  
+![simpleLineOptions.width.values = 5,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`5,1`
+`1,1,1,10`  
+![simpleLineOptions.width.values = 1,1,1,10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-![simpleLineOptions.width.values = 5,1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`10,1,10,1,10,1`  
+![simpleLineOptions.width.values = 10,1,10,1,10,1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`10,1,10,1`
+#### Color
 
-![simpleLineOptions.width.values = 10,1,10,1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+##### Values (head to tail)
 
-**`simpleLineOptions.color.values`** — Hex color(s) (`RRGGBB`) for the line; a list makes a head-to-tail gradient. Invalid entries fall back to black.
+Single hex (RRGGBB without #, e.g. 000000 for black) or comma-separated list for a gradient from head to tail (e.g. 000000,FF0000,FFFFFF for black->red->white). Each color gets an equal share; repeat to widen. Invalid entries fall back to black.
 
-`FF0000`
-
+`FF0000`  
 ![simpleLineOptions.color.values = FF0000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`00A2FF,8B00FF`
+`FF0000,FF7F00,FFFF00,7FFF00,00FF00,00FFFF,0000FF,4B0082,8B00FF`  
+![simpleLineOptions.color.values = FF0000,FF7F00,FFFF00,7FFF00,00FF00,00FFFF,0000FF,4B0082,8B00FF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-![simpleLineOptions.color.values = 00A2FF,8B00FF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+##### Blend width
 
-`000000,FF0000,FFFFFF`
+Percentage of each transition spent blending (0 = pure bands, 100 = full gradient). 50 with red,blue gives 25% hard red, 50% blend, 25% hard blue. Only applies with two or more colors.
 
-![simpleLineOptions.color.values = 000000,FF0000,FFFFFF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`0`  
+![simpleLineOptions.color.blend_width = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+![simpleLineOptions.color.blend_width = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
 
-**`simpleLineOptions.color.blend_width`** — 0–100: how much of each transition blends (0 = hard bands, 100 = full gradient).
+`50`  
+![simpleLineOptions.color.blend_width = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+![simpleLineOptions.color.blend_width = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
 
-`0`
+`100`  
+![simpleLineOptions.color.blend_width = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+![simpleLineOptions.color.blend_width = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
 
-![simpleLineOptions.color.blend_width = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+#### Opacity
 
-`50`
+##### Values (head to tail)
 
-![simpleLineOptions.color.blend_width = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade, or "100,0,100" for a pulse). Each value gets an equal share; repeat to widen. Leave one value for uniform opacity.
 
-`100`
-
-![simpleLineOptions.color.blend_width = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`simpleLineOptions.color.interpolation`** — Blending curve: `linear`, `smoothstep`, `ease_in`, `ease_out`.
-
-`linear`
-
-![simpleLineOptions.color.interpolation = linear](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`smoothstep`
-
-![simpleLineOptions.color.interpolation = smoothstep](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`ease_in`
-
-![simpleLineOptions.color.interpolation = ease_in](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`ease_out`
-
-![simpleLineOptions.color.interpolation = ease_out](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`simpleLineOptions.opacity.values`** — Comma-separated opacity percentages (0–100) from head to tail.
-
-`100`
-
+`100`  
 ![simpleLineOptions.opacity.values = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`100,0`
-
+`100,0`  
 ![simpleLineOptions.opacity.values = 100,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`100,0,100`
-
+`100,0,100`  
 ![simpleLineOptions.opacity.values = 100,0,100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-**`simpleLineOptions.trail_origin_on_cursor_change`** — On cursor image change: `none` freezes the origin, `immediate` snaps, `smooth` glides there.
+#### Antialiasing
 
-`none`
+Smooth the trail edges.
 
-![simpleLineOptions.trail_origin_on_cursor_change = none](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`immediate`
-
-![simpleLineOptions.trail_origin_on_cursor_change = immediate](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`smooth`
-
-![simpleLineOptions.trail_origin_on_cursor_change = smooth](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`simpleLineOptions.antialiasing`** — Smooth the trail edges.
-
-`on`
-
+`on`  
 ![simpleLineOptions.antialiasing = on](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`off`
-
+`off`  
 ![simpleLineOptions.antialiasing = off](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
 ### Cursor ghost options
 
-**`ghostOptions.trail_mode`** — `time_based` or `size_based`: how the copies expire.
+Applies when Style is Cursor ghost.
 
-`time_based`
+#### Trail mode
 
+How the copies disappear.
+
+`ghostOptions.trail_mode: time_based`: each copy fades after the Tail duration  
 ![ghostOptions.trail_mode = time_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`size_based`
-
+`ghostOptions.trail_mode: size_based`: keeps a fixed number of copies even when the cursor stops  
 ![ghostOptions.trail_mode = size_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-**`ghostOptions.timeBased.tail_duration`** — Milliseconds each cursor copy stays visible (min 20).
+#### Time based
 
-`300`
+Applies when Trail mode is Time based.
 
+##### Tail duration
+
+How long each cursor copy stays visible, in milliseconds. Minimum 20.
+
+`100`  
+![ghostOptions.timeBased.tail_duration = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+
+`300`  
 ![ghostOptions.timeBased.tail_duration = 300](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`1000`
-
+`1000`  
 ![ghostOptions.timeBased.tail_duration = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`2000`
+#### Size based
 
-![ghostOptions.timeBased.tail_duration = 2000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+Applies when Trail mode is Size based.
 
-**`ghostOptions.sizeBased.tail_size`** — Number of cursor copies in the trail (min 2, max 512).
+##### Copies
 
-`5`
+Number of cursor copies in the trail (Size based mode). Minimum 2, maximum 512.
 
+`5`  
 ![ghostOptions.sizeBased.tail_size = 5](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`20`
-
+`20`  
 ![ghostOptions.sizeBased.tail_size = 20](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`50`
-
+`50`  
 ![ghostOptions.sizeBased.tail_size = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-**`ghostOptions.sizeBased.timeout`** — Milliseconds of inactivity before the copies fade, using the Time based duration (0 = disabled).
+##### Timeout
 
-`0`
+Milliseconds of inactivity before the trail starts fading (using the Time based tail duration). 0 = trail always visible.
 
-![ghostOptions.sizeBased.timeout = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`500`  
+![ghostOptions.sizeBased.timeout = 500](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+ 
+#### Copy spacing
 
-`1000`
+Extra distance in pixels added between cursor copies (0 = automatic, based on the copy count). Maximum 200.
 
-![ghostOptions.sizeBased.timeout = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`5000`
-
-![ghostOptions.sizeBased.timeout = 5000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`ghostOptions.spacing`** — Extra distance in pixels between copies (0 = automatic, based on the copy count; max 200).
-
-`0`
-
-![ghostOptions.spacing = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`10`
-
+`10`  
 ![ghostOptions.spacing = 10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`40`
+`25`  
+![ghostOptions.spacing = 25](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-![ghostOptions.spacing = 40](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+#### Size
 
-**`ghostOptions.size.values`** — Comma-separated size multipliers from head to tail (1 = same, 0.8 = 80%). Avoid values above 1 (upscaled copies look pixelated).
+##### Values (head to tail)
 
-`1`
+Comma-separated size multipliers from head to tail (1 = same size, 0.8 = 80%, 2 = twice). Each value gets an equal share; repeat to widen (e.g. "1,0.5,1,0.5"). Avoid values above 1 (upscaled copies look pixelated); use the Windows cursor size setting to enlarge the cursor.
 
+`1`  
 ![ghostOptions.size.values = 1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`1,0`
-
+`1,0`  
 ![ghostOptions.size.values = 1,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`0.5,1`
+`1,0.2,1,0.2`  
+![ghostOptions.size.values = 1,0.2,1,0.2](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-![ghostOptions.size.values = 0.5,1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+#### Opacity
 
-`1,0.5,1,0.5`
+##### Values (head to tail)
 
-![ghostOptions.size.values = 1,0.5,1,0.5](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade). Each value gets an equal share; repeat to widen.
 
-**`ghostOptions.opacity.values`** — Comma-separated opacity percentages (0–100) from head to tail.
-
-`100`
-
-![ghostOptions.opacity.values = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`100,0`
-
+`100,0`  
 ![ghostOptions.opacity.values = 100,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`100,20,100,20`
-
+`100,20,100,20`  
 ![ghostOptions.opacity.values = 100,20,100,20](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-**`ghostOptions.color.values`** — Empty keeps the cursor's own colors; otherwise hex color(s) to recolor the pixels selected by Replace.
+#### Color
 
-`(empty)`
+##### Values (head to tail)
 
-![ghostOptions.color.values = empty](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+Leave empty to keep the cursor's own colors. Otherwise a single hex (RRGGBB without #) or comma-separated list for a gradient from head to tail; pixels matching the Replace color are recolored to this value (FFFFFF makes white copies). Each color gets an equal share; repeat to widen. Invalid entries fall back to black. A single color disables Blend width.
 
-`FFFFFF`
+`(empty)`  
+![ghostOptions.color.values = empty](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+![ghostOptions.color.values = empty](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+![ghostOptions.color.values = empty](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
 
-![ghostOptions.color.values = FFFFFF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`ff0000`  
+![ghostOptions.color.values = ff0000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`00A2FF,8B00FF`
+`ff00ff,00ffff,ffff00`  
+![ghostOptions.color.values = ff00ff,00ffff,ffff00](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-![ghostOptions.color.values = 00A2FF,8B00FF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+##### Blend width
 
-**`ghostOptions.color.blend_width`** — 0–100: how much of each transition blends (0 = hard bands, 100 = full gradient).
+Percentage of each transition spent blending (0 = pure bands, 100 = full gradient). Only applies with two or more colors. (same principle as for the trail)
 
-`0`
+##### Replace
 
-![ghostOptions.color.blend_width = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+Only used when Color > Values is set.
 
-`50`
+###### Mode
 
-![ghostOptions.color.blend_width = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+Which cursor pixels to recolor.
 
-`100`
-
-![ghostOptions.color.blend_width = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`ghostOptions.color.interpolation`** — Blending curve: `linear`, `smoothstep`, `ease_in`, `ease_out`.
-
-`linear`
-
-![ghostOptions.color.interpolation = linear](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`smoothstep`
-
-![ghostOptions.color.interpolation = smoothstep](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`ease_in`
-
-![ghostOptions.color.interpolation = ease_in](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`ease_out`
-
-![ghostOptions.color.interpolation = ease_out](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`ghostOptions.color.replace.mode`** — Pixels to recolor: `auto` (enclosed center color), `custom` (the Custom color), or `whole` (every non-transparent pixel).
-
-`auto`
-
+`ghostOptions.color.replace.mode: auto`: the cursor's enclosed center color (ignoring the outline/contour; falls back to the largest area when nothing is enclosed)  
 ![ghostOptions.color.replace.mode = auto](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`custom`
-
-![ghostOptions.color.replace.mode = custom](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`whole`
-
+`ghostOptions.color.replace.mode: whole`: every non-transparent pixel  
 ![ghostOptions.color.replace.mode = whole](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-**`ghostOptions.color.replace.custom`** — Original cursor color to swap for `color.values` when mode is `custom` (e.g. `000000` for a black body).
+`ghostOptions.color.replace.mode: custom`: the Custom color defined in the next setting (see below for examples) 
 
-`FFFFFF`
+###### Custom color
 
-![ghostOptions.color.replace.custom = FFFFFF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+Original cursor color to replace with the Values color (used when Mode is Custom). Set 000000 to recolor a black cursor body, or FFFFFF to recolor a white outline.
 
-`000000`
-
-![ghostOptions.color.replace.custom = 000000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`808080`
-
-![ghostOptions.color.replace.custom = 808080](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`ffffff`  
+![ghostOptions.color.replace.mode = custom](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+`f7bb0e`    
+![ghostOptions.color.replace.mode = custom](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+`000000`    
+![ghostOptions.color.replace.mode = custom](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
 ### Enable/disable hotkey
 
-**`hotkeyOptions.key`** — Global hotkey that toggles the trail on/off. Format `Modifier+Key`; at least one modifier (Ctrl, Alt, Shift, Win) is required. Empty disables the hotkey.
+#### Key
 
-`(empty)`
+Press to toggle the trail on or off. Format: Modifier+Key (e.g. Ctrl+Alt+T). Modifiers: Ctrl, Alt, Shift, Win. At least one modifier is required. Leave empty to disable the hotkey.
 
-![hotkeyOptions.key = empty](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+#### Animation
 
-`Ctrl+Alt+T`
-
-![hotkeyOptions.key = Ctrl+Alt+T](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`hotkeyOptions.animate`** — Show a circle animation when the hotkey toggles the trail.
-
-`on`
-
+Show a circle animation when the hotkey toggles the trail.    
 ![hotkeyOptions.animate = on](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`off`
-
-![hotkeyOptions.animate = off](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-The animation is a circle outline (2px, in the cursor's color, centered on the trail start and following the cursor): it grows and fades out when disabling, and shrinks and fades in when enabling.
-
-`toggle effect`
-
-![hotkey toggle effect](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+The animation is a circle outline (2px, in the cursor's color, centered on the trail start and following the cursor): it grows and fades out when disabling, and shrinks and fades in when enabling.  
 
 ### Trail offset
+Fine-tune the trail origin horizontally in pixels (auto-centered by default, 0 = no adjustment)
 
-**`tail_offset.x`** — Horizontal nudge of the trail origin in pixels (0 = auto-centered).
-
-`-10`
-
+`0 0`  
 ![tail_offset.x = -10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
-`0`
-
-![tail_offset.x = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`+10`
-
-![tail_offset.x = +10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`tail_offset.y`** — Vertical nudge of the trail origin in pixels (0 = auto-centered).
-
-`-10`
-
-![tail_offset.y = -10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`0`
-
-![tail_offset.y = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`+10`
-
+`15 15`  
 ![tail_offset.y = +10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-### Debug
-
-**`debug.show_outline`** — Draw white (bitmap bounds) and red (visible pixels) outline boxes plus a green `+` at the trail start.
-
-`off`
-
-![debug.show_outline = off](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`on`
-
-![debug.show_outline = on](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
 
 ## Above the taskbar and Start menu
 
@@ -491,14 +385,14 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 8. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
 9. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
 
-### Settings & interpolation
+### Settings & blending
 
 - `LoadSettings` uses `ReadStringSetting`, `ParseFloatList`, `SplitAndTrim`, and `ParseHexColor`, and precomputes color band boundaries (`settings.colorBandStart`/`colorBandEnd`) and opacity alphas (`settings.opacityValues`, stored as 0–1) so the hot path does no parsing or per-frame allocation. `LoadCommonTrailSettings(prefix)` reads the settings shared by both styles (trail mode, tail duration/size, timeout, opacity) from `ghostOptions` or `simpleLineOptions`, and `LoadColorSettings(prefix, defaultColor)` reads the per-style color gradient into `settings.activeColorsRGB` (and precomputes the ghost tint samples into `settings.ghostTints`); `TrailPointBudget`/`AutoPointSpacing` hold the shared point-count and spacing formulas.
-- `GetBlendedColor`, `InterpolateValues`, and `InterpolateOpacity` are allocation-free; `Ease` centralizes the easing curves (`linear`/`smoothstep`/`ease_in`/`ease_out`).
+- `GetBlendedColor`, `InterpolateValues`, and `InterpolateOpacity` are allocation-free; `Ease` applies the smoothstep easing curve.
 
 ### Cursor geometry
 
-`UpdateCursorCenterOffset` caches, per `HCURSOR`: the bitmap-center offset (for the debug boxes), the visible-pixel-center offset (the line-style trail origin), the hotspot, the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt only when the cursor handle changes. `ComputeCursorGeom` holds the shared computation; `GetCursorGeom` lazily computes geometry for any cursor handle still referenced by the trail (so the ghost style can draw older images after an image change). Ghost samples store the raw cursor hotspot, and the ghost renderer anchors each copy by its own image's hotspot, so a copy lands exactly where that cursor image was — independent of the render thread's offset refresh. The ghost style also builds and caches D2D bitmaps per `HCURSOR` via `EnsureCursorBitmap`, rendering the cursor with `DrawIconEx` at the on-screen pixel size (color + mask + anti-aliased alpha) so copies are blitted 1:1 without resampling. The `ghostOptions.color` gradient (when set) is baked into the cached pixels by sampling it at `kGhostTintSteps` ratios (one bitmap per sample; an empty color list yields a single untinted variant), and `GetCursorBitmap(hCursor, ratio)` selects the nearest variant for each copy. `color.replace.mode` picks the pixels to recolor: `whole` swaps every non-transparent pixel; `auto` and `custom` split each pixel between two reference colors — the replace color (`auto` uses the cursor's enclosed center color from `AnalyzeCursorColors`, falling back to the largest region when nothing is enclosed; `custom` uses `color.replace.custom`) and a keep color (the largest boundary/outline region, or the region farthest from the replace color) — swapping pixels closer to the replace color with a small softness band around the midpoint, so anti-aliased transitions split cleanly instead of leaving a halo. Both caches are released with the render target.
+`UpdateCursorCenterOffset` caches, per `HCURSOR`: the bitmap-center offset (for the debug boxes), the visible-pixel-center offset (the line-style trail origin), the hotspot, the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt only when the cursor handle changes. `ComputeCursorGeom` holds the shared computation; `GetCursorGeom` lazily computes geometry for any cursor handle still referenced by the trail (so the ghost style can draw older images after an image change). Ghost samples store the raw cursor hotspot, and the ghost renderer anchors each copy by its own image's hotspot, so a copy lands exactly where that cursor image was — independent of the render thread's offset refresh. The ghost style also builds and caches D2D bitmaps per `HCURSOR` via `EnsureCursorBitmap`, rendering the cursor with `DrawIconEx` at the on-screen pixel size (color + mask + anti-aliased alpha) so copies are blitted 1:1 without resampling. The `ghostOptions.color` gradient (when set) is baked into the cached pixels by sampling it at `kGhostTintSteps` ratios (one bitmap per sample; an empty color list yields a single untinted variant), and `GetCursorBitmap(hCursor, ratio)` selects the nearest variant for each copy. `color.replace.mode` picks the pixels to recolor: `whole` swaps every non-transparent pixel; `auto` splits each pixel between two reference colors — the replace color (the cursor's enclosed center color from `AnalyzeCursorColors`, falling back to the largest region when nothing is enclosed) and a keep color (the largest boundary/outline region) — swapping pixels closer to the replace color with a small softness band around the midpoint; `custom` replaces pixels whose color matches `color.replace.custom` (soft falloff so anti-aliased edges blend), leaving every other color untouched. Both caches are released with the render target.
 
 ### Lifecycle
 
@@ -559,36 +453,12 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
     - blend_width: 100
       $name: Blend width
       $description: Percentage of each transition spent blending (0 = pure bands, 100 = full gradient). 50 with red,blue gives 25% hard red, 50% blend, 25% hard blue. Only applies with two or more colors.
-    - interpolation: "smoothstep"
-      $name: Interpolation
-      $description: |-
-        Easing curve used to blend between colors (only applies with two or more colors):
-        - Linear
-        - Smoothstep
-        - Ease in
-        - Ease out
-      $options:
-      - linear: Linear
-      - smoothstep: Smoothstep
-      - ease_in: Ease in
-      - ease_out: Ease out
     $name: Color
   - opacity:
     - values: "100,80"
       $name: Values (head to tail)
       $description: Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade, or "100,0,100" for a pulse). Each value gets an equal share; repeat to widen. Leave one value for uniform opacity.
     $name: Opacity
-  - trail_origin_on_cursor_change: "smooth"
-    $name: Trail origin on cursor change
-    $description: |-
-      What the trail origin does when the cursor image changes:
-      - None: freezes the origin
-      - Immediate: snaps to the new cursor center
-      - Smooth: glides there with an ease-in-out transition
-    $options:
-    - none: None
-    - immediate: Immediate
-    - smooth: Smooth
   - antialiasing: true
     $name: Antialiasing
     $description: Smooth the trail edges.
@@ -635,35 +505,22 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
   - color:
     - values: ""
       $name: Values (head to tail)
-      $description: "Leave empty to keep the cursor's own colors. Otherwise a single hex (RRGGBB without #) or comma-separated list for a gradient from head to tail; pixels matching the Replace color are recolored to this value (FFFFFF makes white copies). Each color gets an equal share; repeat to widen. Invalid entries fall back to black. A single color disables Blend width and Interpolation."
+      $description: "Leave empty to keep the cursor's own colors. Otherwise a single hex (RRGGBB without #) or comma-separated list for a gradient from head to tail; pixels matching the Replace color are recolored to this value (FFFFFF makes white copies). Each color gets an equal share; repeat to widen. Invalid entries fall back to black. A single color disables Blend width."
     - blend_width: 100
       $name: Blend width
       $description: Percentage of each transition spent blending (0 = pure bands, 100 = full gradient). Only applies with two or more colors.
-    - interpolation: "smoothstep"
-      $name: Interpolation
-      $description: |-
-        Easing curve used to blend between colors (only applies with two or more colors):
-        - Linear
-        - Smoothstep
-        - Ease in
-        - Ease out
-      $options:
-      - linear: Linear
-      - smoothstep: Smoothstep
-      - ease_in: Ease in
-      - ease_out: Ease out
     - replace:
       - mode: "auto"
         $name: Mode
         $description: |-
           Which cursor pixels to recolor:
           - Auto: the cursor's enclosed center color (ignoring the outline/contour; falls back to the largest area when nothing is enclosed)
-          - Custom: the Custom color below
           - Whole: every non-transparent pixel
+          - Custom: the Custom color below
         $options:
         - auto: Auto (center color)
-        - custom: Custom
         - whole: Whole cursor
+        - custom: Custom
       - custom: "FFFFFF"
         $name: Custom color
         $description: "Original cursor color to replace with the Values color (used when Mode is Custom). Set 000000 to recolor a black cursor body, or FFFFFF to recolor a white outline."
@@ -691,11 +548,6 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
     $name: Y
     $description: Fine-tune the trail origin vertically in pixels (auto-centered by default, 0 = no adjustment)
   $name: Trail offset
-- debug:
-  - show_outline: false
-    $name: Show outline
-    $description: Draw a white box around the detected cursor bitmap, a red box around its visible (alpha-trimmed) pixels, and a green + at the trail start, to verify the trail origin and cursor size.
-  $name: Debug
 */
 // ==/WindhawkModSettings==
 
@@ -725,20 +577,19 @@ struct Sample {
 // Global state variables
 
 // How the trail origin reacts to cursor image changes (Simple line only).
+// The "Trail origin on cursor change" setting was removed, so only ORIGIN_SMOOTH
+// is used now; ORIGIN_NONE and ORIGIN_IMMEDIATE are kept for reference.
 enum TrailOriginMode { ORIGIN_NONE, ORIGIN_IMMEDIATE, ORIGIN_SMOOTH };
-
-// Easing curves used for color blending and interpolation.
-enum ColorInterpolation { INTERP_LINEAR, INTERP_SMOOTHSTEP, INTERP_EASE_IN, INTERP_EASE_OUT };
 
 // Number of tint samples baked across the ghost color gradient. A flat color
 // needs only one; otherwise the continuous gradient is quantized to this many
 // steps (higher = smoother, more bitmaps per cursor image).
 static const int kGhostTintSteps = 64;
 
-// Recoloring splits each pixel between two reference colors (the color to
-// replace and the color to keep): a pixel is swapped when it is closer to the
-// replace color. kGhostSplitSoftness is the RGB-distance band around the
-// midpoint over which the swap ramps, so anti-aliased transitions blend.
+// Recoloring swaps a pixel into the tint when it is closer to the replace color
+// than to the keep color (Auto), or when it matches the custom color (Custom).
+// kGhostSplitSoftness is the RGB-distance band over which the swap ramps, so
+// anti-aliased transitions blend instead of leaving a hard edge.
 static const float kGhostSplitSoftness = 0.2f;
 
 // Dominant-color detection: pixels at least this opaque are grouped into
@@ -765,7 +616,8 @@ struct Settings {
     int   tailSize = 2000;
     DWORD sizeTimeout = 0;
     bool  antialiasing = true;
-    bool  debugShowOutline = false;
+    bool  debugShowOutline = false;                    // test-only; hidden from the settings UI
+    bool  debugShowTailPreview = false;                // test-only; hidden from the settings UI
     bool  isGhost = false;                            // active style is cursor_ghost
     int   ghostSpacing = 0;                           // extra px between ghost copies
     float ghostSpawnDist = 2.0f;                      // px cursor must travel before a new ghost is stamped
@@ -783,7 +635,6 @@ struct Settings {
     std::vector<float> simpleLineWidths;              // parsed width values, one per stop
     std::vector<Rgb>   activeColorsRGB;               // pre-parsed colors of the active style
     int   colorBlendWidth = 0;
-    ColorInterpolation colorInterp = INTERP_SMOOTHSTEP;
     float colorBlendHalf = 0.0f;
     std::vector<float> colorBandStart;                // precomputed pure-band boundaries
     std::vector<float> colorBandEnd;
@@ -1188,7 +1039,7 @@ static void LoadCommonTrailSettings(const wchar_t* prefix) {
 // after LoadSettings; forward-declared so the tint samples can be precomputed).
 static void GetBlendedColor(float ratio, float& r, float& g, float& b);
 
-// Parses the color settings (values, blend width, interpolation) for a style
+// Parses the color settings (values, blend width) for a style
 // prefix into settings.activeColorsRGB and precomputes the pure-band
 // boundaries used by GetBlendedColor. The two styles keep independent values.
 // Returns false when the values list is empty and defaultColor is null, meaning
@@ -1224,12 +1075,6 @@ static bool LoadColorSettings(const wchar_t* prefix, const wchar_t* defaultColor
     if (settings.colorBlendWidth < 0) settings.colorBlendWidth = 0;
     if (settings.colorBlendWidth > 100) settings.colorBlendWidth = 100;
 
-    std::wstring interp = ReadStringSetting(key(L"color.interpolation").c_str(), L"smoothstep");
-    if (interp == L"ease_in")      settings.colorInterp = INTERP_EASE_IN;
-    else if (interp == L"ease_out") settings.colorInterp = INTERP_EASE_OUT;
-    else if (interp == L"smoothstep") settings.colorInterp = INTERP_SMOOTHSTEP;
-    else                            settings.colorInterp = INTERP_LINEAR;
-
     // Precompute pure-band boundaries for GetBlendedColor.
     settings.colorBlendHalf = (settings.colorBlendWidth / 100.0f) / 2.0f;
     settings.colorBandStart.clear();
@@ -1252,7 +1097,11 @@ void LoadSettings() {
     settings.tailOffsetX = Wh_GetIntSetting(L"tail_offset.x");
     settings.tailOffsetY = Wh_GetIntSetting(L"tail_offset.y");
 
-    settings.debugShowOutline = Wh_GetIntSetting(L"debug.show_outline") != 0;
+    // Test-only debug features, hidden from the settings UI (the `debug` group
+    // was removed from the ==WindhawkModSettings== metadata). Flip these to
+    // true to exercise the debug outline / tail preview during development.
+    settings.debugShowOutline = false;
+    settings.debugShowTailPreview = false;
 
     settings.activeStyle = ReadStringSetting(L"style", L"simple_line");
 
@@ -1325,6 +1174,11 @@ void LoadSettings() {
 
         settings.antialiasing = Wh_GetIntSetting(L"simpleLineOptions.antialiasing") != 0;
 
+        // "Trail origin on cursor change" was removed: the origin is always
+        // smooth now. The parsing and the other TrailOriginMode values are kept
+        // below for reference in case the setting is brought back.
+        settings.trailOriginMode = ORIGIN_SMOOTH;
+        /*
         settings.trailOriginOnCursorChange = ReadStringSetting(L"simpleLineOptions.trail_origin_on_cursor_change", L"smooth");
         if (settings.trailOriginOnCursorChange != L"none" &&
             settings.trailOriginOnCursorChange != L"immediate" &&
@@ -1340,6 +1194,7 @@ void LoadSettings() {
         } else {
             settings.trailOriginMode = ORIGIN_NONE;
         }
+        */
     }
 
     if (settings.tailDuration < 20) settings.tailDuration = 20;
@@ -1853,26 +1708,42 @@ static void EnsureCursorBitmap(HCURSOR hCursor, int targetW, int targetH) {
                 for (size_t i = 0; i < pixelCount; ++i) {
                     if (src[i * 4 + 3] != 0) weight[i] = 1.0f;
                 }
+            } else if (settings.ghostReplaceMode == GHOST_REPLACE_CUSTOM) {
+                // Custom: replace only pixels close to the custom color, keeping
+                // every other color untouched. A soft falloff blends anti-aliased
+                // edges between the matched color and its neighbors.
+                const Rgb replaceColor = settings.ghostReplaceColor;
+                float softness = kGhostSplitSoftness;
+                if (softness < 0.01f) softness = 0.01f;
+                for (size_t i = 0; i < pixelCount; ++i) {
+                    const BYTE* s = src + i * 4;
+                    BYTE a = s[3];
+                    if (a == 0) continue;
+                    float inv = 1.0f / (float)a;
+                    float sr = s[2] * inv, sg = s[1] * inv, sb = s[0] * inv;  // straight
+                    if (sr > 1.0f) sr = 1.0f;
+                    if (sg > 1.0f) sg = 1.0f;
+                    if (sb > 1.0f) sb = 1.0f;
+                    float dA = RgbDistance(sr, sg, sb, replaceColor);
+                    float w = 1.0f - dA / softness;
+                    if (w < 0.0f) w = 0.0f;
+                    if (w > 1.0f) w = 1.0f;
+                    weight[i] = w;
+                }
             } else {
+                // Auto: split each pixel between the enclosed center (replace)
+                // and the contour/outline (keep), so only the fill is recolored.
                 CursorColorAnalysis ca = AnalyzeCursorColors(src, targetW, targetH);
 
                 Rgb replaceColor, keepColor;
-                if (settings.ghostReplaceMode == GHOST_REPLACE_AUTO) {
-                    // Prefer the enclosed center over the contour. If every
-                    // region touches the background, fall back to the largest.
-                    if (ca.hasInterior) {
-                        replaceColor = ca.interior;
-                        keepColor = ca.hasBoundary ? ca.boundary : ca.runnerUp;
-                    } else {
-                        replaceColor = ca.dominant;
-                        keepColor = ca.runnerUp;
-                    }
+                // Prefer the enclosed center over the contour. If every
+                // region touches the background, fall back to the largest.
+                if (ca.hasInterior) {
+                    replaceColor = ca.interior;
+                    keepColor = ca.hasBoundary ? ca.boundary : ca.runnerUp;
                 } else {
-                    replaceColor = settings.ghostReplaceColor;
-                    // Keep whichever region color is farthest from the replace color.
-                    keepColor = (RgbDistance(replaceColor.r, replaceColor.g, replaceColor.b, ca.dominant)
-                                 >= RgbDistance(replaceColor.r, replaceColor.g, replaceColor.b, ca.runnerUp))
-                        ? ca.dominant : ca.runnerUp;
+                    replaceColor = ca.dominant;
+                    keepColor = ca.runnerUp;
                 }
 
                 float refDist = RgbDistance(replaceColor.r, replaceColor.g, replaceColor.b, keepColor);
@@ -2013,15 +1884,9 @@ bool IsGameRunning() {
     return false;
 }
 
-// Applies an easing curve to t (expected in [0,1]).
-static float Ease(float t, ColorInterpolation mode) {
-    switch (mode) {
-        case INTERP_EASE_IN:    return t * t;
-        case INTERP_EASE_OUT:   return 1.0f - (1.0f - t) * (1.0f - t);
-        case INTERP_SMOOTHSTEP: return t * t * (3.0f - 2.0f * t);
-        case INTERP_LINEAR:
-        default:                return t;
-    }
+// Applies the smoothstep easing curve to t (expected in [0,1]).
+static float Ease(float t) {
+    return t * t * (3.0f - 2.0f * t);
 }
 
 // Rounds a float to the nearest LONG, away from zero.
@@ -2084,7 +1949,7 @@ static void GetBlendedColor(float ratio, float& r, float& g, float& b) {
     }
     float frac = (ratio - zoneStart) / span;
 
-    frac = Ease(frac, settings.colorInterp);
+    frac = Ease(frac);
 
     // Colors are evenly spaced within the blend region, so the index and
     // fraction are computed directly (no position array allocation).
@@ -2116,7 +1981,7 @@ static float InterpolateValues(const std::vector<float>& values,
     float scaled = ratio * (float)(n - 1);
     size_t idx = (size_t)scaled;
     if (idx > n - 2) idx = n - 2;
-    float frac = Ease(scaled - (float)idx, INTERP_SMOOTHSTEP);
+    float frac = Ease(scaled - (float)idx);
 
     return values[idx] + (values[idx + 1] - values[idx]) * frac;
 }
@@ -2407,10 +2272,12 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             }
 
             // === TRAIL ORIGIN — choose the offset for this sample ===
-            // Immediate/Smooth (Simple line only) follow the current cursor's
-            // visual center so the trail head lands correctly after a cursor
-            // image change (arrow → I-beam). None snapshots the offset when a
-            // new trail starts so all samples share one coordinate space.
+            // The "Trail origin on cursor change" setting was removed, so
+            // trailOriginMode is always ORIGIN_SMOOTH and only that branch is
+            // reachable; the ORIGIN_NONE / ORIGIN_IMMEDIATE branches are kept
+            // for reference. Smooth follows the current cursor's visual center
+            // so the trail head lands correctly after a cursor image change
+            // (arrow → I-beam).
             POINT originOffset;
             if (settings.trailOriginMode != ORIGIN_SMOOTH) {
                 // Reset smooth-transition state so re-entering smooth mode
@@ -2477,7 +2344,7 @@ DWORD WINAPI PollThreadProc(LPVOID) {
                         p = (float)(now - origin.startTime) / len;
                     }
                     if (p > 1.0f) p = 1.0f;
-                    float e = Ease(p, INTERP_SMOOTHSTEP);
+                    float e = Ease(p);
                     origin.smoothedOffsetX = origin.fromX + (origin.target.x - origin.fromX) * e;
                     origin.smoothedOffsetY = origin.fromY + (origin.target.y - origin.fromY) * e;
                     if (p >= 1.0f) origin.transitioning = false;
@@ -2600,6 +2467,8 @@ static void BuildTrailPoints(const POINT& pt, int vX, int vY,
         POINT originOffset = { 0, 0 };
         if (!settings.isGhost) {
             std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
+            // ORIGIN_NONE is unreachable (the setting was removed); kept for
+            // reference.
             originOffset = (settings.trailOriginMode == ORIGIN_NONE)
                 ? cursor.frozenCursorOffset
                 : cursor.visualOffset;
@@ -2936,7 +2805,10 @@ static void RenderToggleEffect(const std::vector<D2D1_POINT_2F>& smoothed,
     }
     float maxRadius = cursorSize * kEffectDiameterFactor * 0.5f;
 
-    float eased = Ease(p, toggleEffect.enabling ? INTERP_EASE_OUT : INTERP_EASE_IN);
+    // Enable: ease out; disable: ease in. Kept local (not via Ease), which is
+    // reserved for the smoothstep color/value blending.
+    float eased = toggleEffect.enabling ? (1.0f - (1.0f - p) * (1.0f - p))
+                                        : (p * p);
     float radius = toggleEffect.enabling ? maxRadius * (1.0f - eased)
                                          : maxRadius * eased;
     float alpha = toggleEffect.enabling ? eased : (1.0f - eased);
@@ -2957,6 +2829,86 @@ static void RenderToggleEffect(const std::vector<D2D1_POINT_2F>& smoothed,
              (LONG)(cx + margin), (LONG)(cy + margin));
 }
 
+// --- Debug: static tail preview --------------------------------------------
+// Draws a fixed horizontal preview of the trail's appearance to the left of the
+// cursor, so it can be tuned without moving the mouse. It reuses the style
+// renderers, so width/color/opacity/size/replace and the gradients all match the
+// real trail; only the animated (position/age) parts are omitted.
+static const float kPreviewLength = 500.0f;
+static const float kPreviewOffsetY = 50.0f;
+static const int   kPreviewLinePoints = 64;
+static const int   kPreviewMaxCopies = 512;
+
+static void RenderTailPreview(const POINT& pt, int vX, int vY,
+                              RECT& bbox, bool& hasBBox) {
+    if (!render.pDCRenderTarget) return;
+
+    // Head sits flush at the cursor's x; the tail extends leftward.
+    float rightX = (float)(pt.x - vX);
+    float cy = (float)(pt.y - kPreviewOffsetY - vY);
+
+    if (settings.isGhost) {
+        HCURSOR h = cursor.cachedCursor;
+        if (!h) return;
+        CursorGeom g;
+        if (!GetCursorGeom(h, g)) return;
+
+        // Copy count: the configured Copies when size-based, otherwise as many
+        // as fit over the preview length at the configured spawn spacing.
+        int count;
+        if (settings.sizeBased) {
+            count = settings.tailSize;
+        } else {
+            float spacing = settings.ghostSpawnDist;
+            if (spacing < 1.0f) spacing = 1.0f;
+            count = (int)(kPreviewLength / spacing) + 1;
+        }
+        if (count < 2) count = 2;
+        if (count > kPreviewMaxCopies) count = kPreviewMaxCopies;
+
+        std::vector<D2D1_POINT_2F> points;
+        std::vector<HCURSOR> cursors;
+        std::vector<float> ratios;
+        points.reserve(count);
+        cursors.reserve(count);
+        ratios.reserve(count);
+        for (int i = 0; i < count; ++i) {
+            float t = (float)i / (float)(count - 1);
+            // Head at the right end, tail to the left.
+            points.push_back(D2D1::Point2F(rightX - t * kPreviewLength, cy));
+            cursors.push_back(h);
+            ratios.push_back(t);
+        }
+        RenderCursorGhostStyle(points, cursors, ratios);
+
+        float w = g.bmWidth * g.dpiScaleX * settings.ghostSizeMax;
+        float hh = g.bmHeight * g.dpiScaleY * settings.ghostSizeMax;
+        GrowBBox(bbox, hasBBox,
+                 (LONG)(rightX - kPreviewLength - w), (LONG)(cy - hh),
+                 (LONG)(rightX + w), (LONG)(cy + hh));
+    } else {
+        float maxWidth = 1.0f;
+        for (float w : settings.simpleLineWidths) {
+            if (w > maxWidth) maxWidth = w;
+        }
+
+        std::vector<D2D1_POINT_2F> points;
+        points.reserve(kPreviewLinePoints);
+        for (int i = 0; i < kPreviewLinePoints; ++i) {
+            float t = (float)i / (float)(kPreviewLinePoints - 1);
+            points.push_back(D2D1::Point2F(rightX - t * kPreviewLength, cy));
+        }
+        RenderSimpleLineStyle(points);
+
+        float margin = maxWidth * 0.5f + 2.0f;
+        GrowBBox(bbox, hasBBox,
+                 (LONG)(rightX - kPreviewLength), (LONG)(cy - margin),
+                 (LONG)(rightX), (LONG)(cy + margin));
+    }
+
+    runtime.needsClear = true;
+}
+
 VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime) {
     UNREFERENCED_PARAMETER(uMsg);
     UNREFERENCED_PARAMETER(idEvent);
@@ -2975,8 +2927,12 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
     // Read local copies of the atomic flags for consistent use within this
     // frame. The trail is suppressed (history cleared, overlay wiped) while a
     // fullscreen game runs or the enable/disable hotkey has it turned off.
-    bool suppress = runtime.isGameRunning.load() || !runtime.trailEnabled.load();
+    bool gameRunning = runtime.isGameRunning.load();
+    bool suppress = gameRunning || !runtime.trailEnabled.load();
     bool effectActive = toggleEffect.active;
+    // The static tail preview is independent of the enable/disable hotkey, but
+    // stays paused while a fullscreen game runs.
+    bool previewActive = settings.debugShowTailPreview && !gameRunning;
 
     int vX = GetSystemMetrics(SM_XVIRTUALSCREEN);
     int vY = GetSystemMetrics(SM_YVIRTUALSCREEN);
@@ -2984,16 +2940,16 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
     int vH = GetSystemMetrics(SM_CYVIRTUALSCREEN) - 1;
 
     if (suppress) {
-        // Keep the cursor geometry fresh so the toggle circle can follow it
-        // even while the trail itself is off.
-        if (effectActive) {
+        // Keep the cursor geometry fresh so the toggle circle and the tail
+        // preview can follow the cursor even while the trail itself is off.
+        if (effectActive || previewActive) {
             UpdateCursorCenterOffset();
         }
         {
             std::lock_guard<std::mutex> lock(runtime.historyMutex);
             bool wasEmpty = runtime.history.empty();
             runtime.history.clear();
-            if (wasEmpty && !runtime.needsClear && !effectActive) {
+            if (wasEmpty && !runtime.needsClear && !effectActive && !previewActive) {
                 return;
             }
         }
@@ -3011,7 +2967,7 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
         historyEmpty = runtime.history.empty();
     }
 
-    if (!historyEmpty || runtime.needsClear || effectActive ||
+    if (!historyEmpty || runtime.needsClear || effectActive || previewActive ||
         (settings.debugShowOutline && cursor.bmWidth > 0 && cursor.bmHeight > 0)) {
         HDC hdcScreen = GetDC(NULL);
 
@@ -3056,6 +3012,10 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
             RenderTrail(smoothed, cursors, ratios);
 
             RenderToggleEffect(smoothed, curBBox, hasCurBBox);
+
+            if (previewActive) {
+                RenderTailPreview(pt, vX, vY, curBBox, hasCurBBox);
+            }
 
             DrawDebug(pt, vX, vY, smoothed, curBBox, hasCurBBox);
 

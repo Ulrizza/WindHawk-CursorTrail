@@ -4,9 +4,9 @@ A fully customizable cursor trail for the Windows desktop.
 
 ## The two styles
 
-- **Simple line** — a polyline that follows the cursor; its width, color, and
+- **Simple line**: a polyline that follows the cursor; its width, color, and
   opacity can change from head to tail.
-- **Cursor ghost** — faded copies of the cursor image, each latched at the spot
+- **Cursor ghost**: faded copies of the cursor image, each latched at the spot
   where it spawned (they stay put and only fade out). Each copy keeps the exact
   cursor image from when it was sampled, so an image change (e.g. arrow to
   I-beam) appears gradually along the trail.
@@ -14,416 +14,317 @@ A fully customizable cursor trail for the Windows desktop.
 ## Features
 
 - **Time based** vs **Size based** trails.
-- **Timing** — tail duration and inactivity timeout.
-- **Size** — stroke width (Simple line) and copy size (Cursor ghost).
-- **Color** — head-to-tail gradients, blend width, interpolation, and ghost
+- **Timing**: tail duration and inactivity timeout.
+- **Size**: stroke width (Simple line) and copy size (Cursor ghost).
+- **Color**: head-to-tail gradients, blend width, and ghost
   recoloring.
-- **Hotkey** — toggle the trail on/off with a customizable global hotkey.
+- **Hotkey**: toggle the trail on/off with a customizable global hotkey.
 
 ## Settings
 
 ### Style
 
-Rendering style.
+Type of trail.
 
-`style: simple_line`  
-![style = cursor_ghost](./Gifs/style%20simple%20line%20default.gif)
+`style: simple_line`: a line whose width, color, and opacity can change along its length  
+![style = simple_line](./images/style.simple_line.gif)
 
-`style: cursor_ghost`  
-![style = simple_line](./Gifs/style%20ghost%20default.gif)
+`style: cursor_ghost`: faded copies of the cursor image, each latched where it spawned  
+![style = cursor_ghost](./images/style.cursor_ghost.gif)
 
 ### Simple line options
 
-How the trail expires.
+Applies when Style is Simple line.
 
-`simpleLineOptions.trail_mode: time_based`  
-![style = cursor_ghost](./Gifs/style%20simple%20line%20default.gif)
+#### Trail mode
 
-`simpleLineOptions.trail_mode: size_based`  
-![simpleLineOptions.trail_mode = size_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+How the trail disappears.
 
-`simpleLineOptions.timeBased.tail_duration`  
-Milliseconds each trail segment stays visible (min 20).
+`simpleLineOptions.trail_mode: time_based`: each part of the trail fades after the Tail duration  
+![simpleLineOptions.trail_mode = time_based](./images/simpleLineOptions.trail_mode.time_based.gif)
+
+`simpleLineOptions.trail_mode: size_based`: keeps a fixed trail length even when the cursor stops  
+![simpleLineOptions.trail_mode = size_based](./images/simpleLineOptions.trail_mode.size_based.gif)
+
+#### Time based
+
+Applies when Trail mode is Time based.
+
+##### Tail duration
+
+How long each trail segment stays visible, in milliseconds. Minimum 20.
+
+`100`  
+![simpleLineOptions.timeBased.tail_duration = 100](./images/simpleLineOptions.timeBased.tail_duration.100.gif)
 
 `300`  
-![simpleLineOptions.timeBased.tail_duration = 300](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.timeBased.tail_duration = 300](./images/simpleLineOptions.timeBased.tail_duration.300.gif)
 
 `1000`  
-![simpleLineOptions.timeBased.tail_duration = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.timeBased.tail_duration = 1000](./images/simpleLineOptions.timeBased.tail_duration.1000.gif)
 
-`2000`  
-![simpleLineOptions.timeBased.tail_duration = 2000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+#### Size based
 
-`simpleLineOptions.sizeBased.tail_size`  
-Total trail length in pixels (min 20).
+Applies when Trail mode is Size based.
 
-`500`
+##### Tail length
 
-![simpleLineOptions.sizeBased.tail_size = 500](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+Maximum trail length in pixels. Minimum 20.
 
-`1500`
+`100`  
+![simpleLineOptions.sizeBased.tail_size = 100](./images/simpleLineOptions.sizeBased.tail_size.100.gif)
 
-![simpleLineOptions.sizeBased.tail_size = 1500](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`500`  
+![simpleLineOptions.sizeBased.tail_size = 500](./images/simpleLineOptions.sizeBased.tail_size.500.gif)
 
-`3000`
+`1000`  
+![simpleLineOptions.sizeBased.tail_size = 1000](./images/simpleLineOptions.sizeBased.tail_size.1000.gif)
 
-![simpleLineOptions.sizeBased.tail_size = 3000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+##### Timeout
 
-**`simpleLineOptions.sizeBased.timeout`** — Milliseconds of inactivity before the trail fades, using the Time based duration (0 = disabled).
+Milliseconds of inactivity before the trail starts fading (using the Time based tail duration). 0 = trail always visible.
 
-`0`
+`0`  
+![simpleLineOptions.sizeBased.timeout = 0](./images/simpleLineOptions.sizeBased.timeout.0.gif)
 
-![simpleLineOptions.sizeBased.timeout = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`500`  
+![simpleLineOptions.sizeBased.timeout = 500](./images/simpleLineOptions.sizeBased.timeout.500.gif)
 
-`1000`
+`1000`  
+![simpleLineOptions.sizeBased.timeout = 1000](./images/simpleLineOptions.sizeBased.timeout.1000.gif)
 
-![simpleLineOptions.sizeBased.timeout = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+#### Width
 
-`5000`
+##### Values (head to tail)
 
-![simpleLineOptions.sizeBased.timeout = 5000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+Comma-separated stroke widths in pixels from head to tail (e.g. "2,1" for a tapered trail, or "10,1,10,1" for a pulsing trail). Each value gets an equal share; repeat to widen (e.g. "2,2,2,2,1" = 80% at 2, 20% at 1). Minimum 1.
 
-**`simpleLineOptions.width.values`** — Comma-separated stroke widths from head to tail. Each value gets an equal share; repeat to widen (e.g. `2,2,2,2,1`).
+`5`  
+![simpleLineOptions.width.values = 5](./images/simpleLineOptions.width.values.5.gif)
 
-`3`
+`5,0`  
+![simpleLineOptions.width.values = 5,0](./images/simpleLineOptions.width.values.5.0.gif)
 
-![simpleLineOptions.width.values = 3](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`1,1,1,10`  
+![simpleLineOptions.width.values = 1,1,1,10](./images/simpleLineOptions.width.values.1.1.1.10.gif)
 
-`5,1`
+`10,1,10,1,10,1`  
+![simpleLineOptions.width.values = 10,1,10,1,10,1](./images/simpleLineOptions.width.values.10.1.10.1.10.1.gif)
 
-![simpleLineOptions.width.values = 5,1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+#### Color
 
-`10,1,10,1`
+##### Values (head to tail)
 
-![simpleLineOptions.width.values = 10,1,10,1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+Single hex (RRGGBB without #, e.g. 000000 for black) or comma-separated list for a gradient from head to tail (e.g. 000000,FF0000,FFFFFF for black->red->white). Each color gets an equal share; repeat to widen. Invalid entries fall back to black.
 
-**`simpleLineOptions.color.values`** — Hex color(s) (`RRGGBB`) for the line; a list makes a head-to-tail gradient. Invalid entries fall back to black.
+`FF0000`  
+![simpleLineOptions.color.values = FF0000](./images/simpleLineOptions.color.values.ff0000.gif)
 
-`FF0000`
+`FF0000,FF7F00,FFFF00,7FFF00,00FF00,00FFFF,0000FF,4B0082,8B00FF`  
+![simpleLineOptions.color.values = FF0000,FF7F00,FFFF00,7FFF00,00FF00,00FFFF,0000FF,4B0082,8B00FF](./images/simpleLineOptions.color.values.rainbow.gif)
 
-![simpleLineOptions.color.values = FF0000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+##### Blend width
 
-`00A2FF,8B00FF`
+Percentage of each transition spent blending (0 = pure bands, 100 = full gradient). 50 with red,blue gives 25% hard red, 50% blend, 25% hard blue. Only applies with two or more colors.
 
-![simpleLineOptions.color.values = 00A2FF,8B00FF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`0`  
+![simpleLineOptions.color.blend_width = 0](./images/simpleLineOptions.color.blend_width.0.png)  
+![simpleLineOptions.color.blend_width = 0](./images/simpleLineOptions.color.blend_width.0.gif)  
 
-`000000,FF0000,FFFFFF`
+`50`  
+![simpleLineOptions.color.blend_width = 50](./images/simpleLineOptions.color.blend_width.50.png)  
+![simpleLineOptions.color.blend_width = 50](./images/simpleLineOptions.color.blend_width.50.gif)  
 
-![simpleLineOptions.color.values = 000000,FF0000,FFFFFF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`100`  
+![simpleLineOptions.color.blend_width = 100](./images/simpleLineOptions.color.blend_width.100.png)  
+![simpleLineOptions.color.blend_width = 100](./images/simpleLineOptions.color.blend_width.100.gif)  
 
-**`simpleLineOptions.color.blend_width`** — 0–100: how much of each transition blends (0 = hard bands, 100 = full gradient).
+#### Opacity
 
-`0`
+##### Values (head to tail)
 
-![simpleLineOptions.color.blend_width = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade, or "100,0,100" for a pulse). Each value gets an equal share; repeat to widen. Leave one value for uniform opacity.
 
-`50`
+`100`  
+![simpleLineOptions.opacity.values = 100](./images/simpleLineOptions.opacity.values.100.gif)
 
-![simpleLineOptions.color.blend_width = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`100,0`  
+![simpleLineOptions.opacity.values = 100,0](./images/simpleLineOptions.opacity.values.100.0.gif)
 
-`100`
+`100,0,100`  
+![simpleLineOptions.opacity.values = 100,0,100](./images/simpleLineOptions.opacity.values.100.0.100.gif)
 
-![simpleLineOptions.color.blend_width = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+#### Antialiasing
 
-**`simpleLineOptions.color.interpolation`** — Blending curve: `linear`, `smoothstep`, `ease_in`, `ease_out`.
+Smooth the trail edges.
 
-`linear`
+`on`  
+![simpleLineOptions.antialiasing = on](./images/simpleLineOptions.antialiasing.on.gif)
 
-![simpleLineOptions.color.interpolation = linear](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`smoothstep`
-
-![simpleLineOptions.color.interpolation = smoothstep](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`ease_in`
-
-![simpleLineOptions.color.interpolation = ease_in](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`ease_out`
-
-![simpleLineOptions.color.interpolation = ease_out](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`simpleLineOptions.opacity.values`** — Comma-separated opacity percentages (0–100) from head to tail.
-
-`100`
-
-![simpleLineOptions.opacity.values = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`100,0`
-
-![simpleLineOptions.opacity.values = 100,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`100,0,100`
-
-![simpleLineOptions.opacity.values = 100,0,100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`simpleLineOptions.trail_origin_on_cursor_change`** — On cursor image change: `none` freezes the origin, `immediate` snaps, `smooth` glides there.
-
-`none`
-
-![simpleLineOptions.trail_origin_on_cursor_change = none](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`immediate`
-
-![simpleLineOptions.trail_origin_on_cursor_change = immediate](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`smooth`
-
-![simpleLineOptions.trail_origin_on_cursor_change = smooth](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`simpleLineOptions.antialiasing`** — Smooth the trail edges.
-
-`on`
-
-![simpleLineOptions.antialiasing = on](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`off`
-
-![simpleLineOptions.antialiasing = off](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`off`  
+![simpleLineOptions.antialiasing = off](./images/simpleLineOptions.antialiasing.off.gif)
 
 ### Cursor ghost options
 
-**`ghostOptions.trail_mode`** — `time_based` or `size_based`: how the copies expire.
+Applies when Style is Cursor ghost.
 
-`time_based`
+#### Trail mode
 
-![ghostOptions.trail_mode = time_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+How the copies disappear.
 
-`size_based`
+`ghostOptions.trail_mode: time_based`: each copy fades after the Tail duration  
+![ghostOptions.trail_mode = time_based](./images/ghostOptions.trail_mode.time_based.gif)
 
-![ghostOptions.trail_mode = size_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`ghostOptions.trail_mode: size_based`: keeps a fixed number of copies even when the cursor stops  
+![ghostOptions.trail_mode = size_based](./images/ghostOptions.trail_mode.size_based.gif)
 
-**`ghostOptions.timeBased.tail_duration`** — Milliseconds each cursor copy stays visible (min 20).
+#### Time based
 
-`300`
+Applies when Trail mode is Time based.
 
-![ghostOptions.timeBased.tail_duration = 300](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+##### Tail duration
 
-`1000`
+How long each cursor copy stays visible, in milliseconds. Minimum 20.
 
-![ghostOptions.timeBased.tail_duration = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`100`  
+![ghostOptions.timeBased.tail_duration = 100](./images/ghostOptions.timeBased.tail_duration.100.gif)
 
-`2000`
+`300`  
+![ghostOptions.timeBased.tail_duration = 300](./images/ghostOptions.timeBased.tail_duration.300.gif)
 
-![ghostOptions.timeBased.tail_duration = 2000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`1000`  
+![ghostOptions.timeBased.tail_duration = 1000](./images/ghostOptions.timeBased.tail_duration.1000.gif)
 
-**`ghostOptions.sizeBased.tail_size`** — Number of cursor copies in the trail (min 2, max 512).
+#### Size based
 
-`5`
+Applies when Trail mode is Size based.
 
-![ghostOptions.sizeBased.tail_size = 5](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+##### Copies
 
-`20`
+Number of cursor copies in the trail (Size based mode). Minimum 2, maximum 512.
 
-![ghostOptions.sizeBased.tail_size = 20](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`5`  
+![ghostOptions.sizeBased.tail_size = 5](./images/ghostOptions.sizeBased.tail_size.5.gif)
 
-`50`
+`20`  
+![ghostOptions.sizeBased.tail_size = 20](./images/ghostOptions.sizeBased.tail_size.20.gif)
 
-![ghostOptions.sizeBased.tail_size = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`50`  
+![ghostOptions.sizeBased.tail_size = 50](./images/ghostOptions.sizeBased.tail_size.50.gif)
 
-**`ghostOptions.sizeBased.timeout`** — Milliseconds of inactivity before the copies fade, using the Time based duration (0 = disabled).
+##### Timeout
 
-`0`
+Milliseconds of inactivity before the trail starts fading (using the Time based tail duration). 0 = trail always visible.
 
-![ghostOptions.sizeBased.timeout = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`500`  
+![ghostOptions.sizeBased.timeout = 500](./images/ghostOptions.sizeBased.timeout.500.gif)
+ 
+#### Copy spacing
 
-`1000`
+Extra distance in pixels added between cursor copies (0 = automatic, based on the copy count). Maximum 200.
 
-![ghostOptions.sizeBased.timeout = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`10`  
+![ghostOptions.spacing = 10](./images/ghostOptions.spacing.10.gif)
 
-`5000`
+`25`  
+![ghostOptions.spacing = 25](./images/ghostOptions.spacing.25.gif)
 
-![ghostOptions.sizeBased.timeout = 5000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+#### Size
 
-**`ghostOptions.spacing`** — Extra distance in pixels between copies (0 = automatic, based on the copy count; max 200).
+##### Values (head to tail)
 
-`0`
+Comma-separated size multipliers from head to tail (1 = same size, 0.8 = 80%, 2 = twice). Each value gets an equal share; repeat to widen (e.g. "1,0.5,1,0.5"). Avoid values above 1 (upscaled copies look pixelated); use the Windows cursor size setting to enlarge the cursor.
 
-![ghostOptions.spacing = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`1`  
+![ghostOptions.size.values = 1](./images/ghostOptions.size.values.1.png)
 
-`10`
+`1,0`  
+![ghostOptions.size.values = 1,0](./images/ghostOptions.size.values.1.0.png)
 
-![ghostOptions.spacing = 10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`1,0.2,1,0.2`  
+![ghostOptions.size.values = 1,0.2,1,0.2](./images/ghostOptions.size.values.1.02.1.02.png)
 
-`40`
+#### Opacity
 
-![ghostOptions.spacing = 40](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+##### Values (head to tail)
 
-**`ghostOptions.size.values`** — Comma-separated size multipliers from head to tail (1 = same, 0.8 = 80%). Avoid values above 1 (upscaled copies look pixelated).
+Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade). Each value gets an equal share; repeat to widen.
 
-`1`
+`100,0`  
+![ghostOptions.opacity.values = 100,0](./images/ghostOptions.opacity.values.100.0.png)
 
-![ghostOptions.size.values = 1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`100,20,100,20`  
+![ghostOptions.opacity.values = 100,20,100,20](./images/ghostOptions.opacity.values.100.20.100.20.png)
 
-`1,0`
+#### Color
 
-![ghostOptions.size.values = 1,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+##### Values (head to tail)
 
-`0.5,1`
+Leave empty to keep the cursor's own colors. Otherwise a single hex (RRGGBB without #) or comma-separated list for a gradient from head to tail; pixels matching the Replace color are recolored to this value (FFFFFF makes white copies). Each color gets an equal share; repeat to widen. Invalid entries fall back to black. A single color disables Blend width.
 
-![ghostOptions.size.values = 0.5,1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`(empty)`  
+![ghostOptions.color.values = empty](./images/ghostOptions.color.values.empty.black.gif)  
+![ghostOptions.color.values = empty](./images/ghostOptions.color.values.empty.pink.gif)  
+![ghostOptions.color.values = empty](./images/ghostOptions.color.values.empty.green.gif)  
 
-`1,0.5,1,0.5`
+`ff0000`  
+![ghostOptions.color.values = ff0000](./images/ghostOptions.color.values.ff0000.gif)
 
-![ghostOptions.size.values = 1,0.5,1,0.5](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`ff00ff,00ffff,ffff00`  
+![ghostOptions.color.values = ff00ff,00ffff,ffff00](./images/ghostOptions.color.values.ff00ff.00ffff.ffff00.gif)
 
-**`ghostOptions.opacity.values`** — Comma-separated opacity percentages (0–100) from head to tail.
+##### Blend width
 
-`100`
+Percentage of each transition spent blending (0 = pure bands, 100 = full gradient). Only applies with two or more colors. (same principle as for the trail)
 
-![ghostOptions.opacity.values = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+##### Replace
 
-`100,0`
+Only used when Color > Values is set.
 
-![ghostOptions.opacity.values = 100,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+###### Mode
 
-`100,20,100,20`
+Which cursor pixels to recolor.
 
-![ghostOptions.opacity.values = 100,20,100,20](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`ghostOptions.color.replace.mode: auto`: the cursor's enclosed center color (ignoring the outline/contour; falls back to the largest area when nothing is enclosed)  
+![ghostOptions.color.replace.mode = auto](./images/ghostOptions.color.replace.mode.auto.gif)
 
-**`ghostOptions.color.values`** — Empty keeps the cursor's own colors; otherwise hex color(s) to recolor the pixels selected by Replace.
+`ghostOptions.color.replace.mode: whole`: every non-transparent pixel  
+![ghostOptions.color.replace.mode = whole](./images/ghostOptions.color.replace.mode.whole.gif)
 
-`(empty)`
+`ghostOptions.color.replace.mode: custom`: the Custom color defined in the next setting (see below for examples) 
 
-![ghostOptions.color.values = empty](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+###### Custom color
 
-`FFFFFF`
+Original cursor color to replace with the Values color (used when Mode is Custom). Set 000000 to recolor a black cursor body, or FFFFFF to recolor a white outline.
 
-![ghostOptions.color.values = FFFFFF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`00A2FF,8B00FF`
-
-![ghostOptions.color.values = 00A2FF,8B00FF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`ghostOptions.color.blend_width`** — 0–100: how much of each transition blends (0 = hard bands, 100 = full gradient).
-
-`0`
-
-![ghostOptions.color.blend_width = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`50`
-
-![ghostOptions.color.blend_width = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`100`
-
-![ghostOptions.color.blend_width = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`ghostOptions.color.interpolation`** — Blending curve: `linear`, `smoothstep`, `ease_in`, `ease_out`.
-
-`linear`
-
-![ghostOptions.color.interpolation = linear](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`smoothstep`
-
-![ghostOptions.color.interpolation = smoothstep](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`ease_in`
-
-![ghostOptions.color.interpolation = ease_in](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`ease_out`
-
-![ghostOptions.color.interpolation = ease_out](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`ghostOptions.color.replace.mode`** — Pixels to recolor: `auto` (enclosed center color), `custom` (the Custom color), or `whole` (every non-transparent pixel).
-
-`auto`
-
-![ghostOptions.color.replace.mode = auto](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`custom`
-
-![ghostOptions.color.replace.mode = custom](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`whole`
-
-![ghostOptions.color.replace.mode = whole](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`ghostOptions.color.replace.custom`** — Original cursor color to swap for `color.values` when mode is `custom` (e.g. `000000` for a black body).
-
-`FFFFFF`
-
-![ghostOptions.color.replace.custom = FFFFFF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`000000`
-
-![ghostOptions.color.replace.custom = 000000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`808080`
-
-![ghostOptions.color.replace.custom = 808080](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`ffffff`  
+![ghostOptions.color.replace.mode = custom](./images/ghostOptions.color.replace.mode.custom.ffffff.gif)  
+`f7bb0e`    
+![ghostOptions.color.replace.mode = custom](./images/ghostOptions.color.replace.mode.custom.f7bb0e.gif)  
+`000000`    
+![ghostOptions.color.replace.mode = custom](./images/ghostOptions.color.replace.mode.custom.000000.gif)
 
 ### Enable/disable hotkey
 
-**`hotkeyOptions.key`** — Global hotkey that toggles the trail on/off. Format `Modifier+Key`; at least one modifier (Ctrl, Alt, Shift, Win) is required. Empty disables the hotkey.
+#### Key
 
-`(empty)`
+Press to toggle the trail on or off. Format: Modifier+Key (e.g. Ctrl+Alt+T). Modifiers: Ctrl, Alt, Shift, Win. At least one modifier is required. Leave empty to disable the hotkey.
 
-![hotkeyOptions.key = empty](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+#### Animation
 
-`Ctrl+Alt+T`
+Show a circle animation when the hotkey toggles the trail.    
+![hotkeyOptions.animate = on](./images/hotkeyOptions.animate.gif)
 
-![hotkeyOptions.key = Ctrl+Alt+T](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`hotkeyOptions.animate`** — Show a circle animation when the hotkey toggles the trail.
-
-`on`
-
-![hotkeyOptions.animate = on](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`off`
-
-![hotkeyOptions.animate = off](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-The animation is a circle outline (2px, in the cursor's color, centered on the trail start and following the cursor): it grows and fades out when disabling, and shrinks and fades in when enabling.
-
-`toggle effect`
-
-![hotkey toggle effect](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+The animation is a circle outline (2px, in the cursor's color, centered on the trail start and following the cursor): it grows and fades out when disabling, and shrinks and fades in when enabling.  
 
 ### Trail offset
+Fine-tune the trail origin horizontally in pixels (auto-centered by default, 0 = no adjustment)
 
-**`tail_offset.x`** — Horizontal nudge of the trail origin in pixels (0 = auto-centered).
+`0 0`  
+![tail_offset.x = -10](./images/tail_offset.0.0.gif)
 
-`-10`
-
-![tail_offset.x = -10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`0`
-
-![tail_offset.x = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`+10`
-
-![tail_offset.x = +10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-**`tail_offset.y`** — Vertical nudge of the trail origin in pixels (0 = auto-centered).
-
-`-10`
-
-![tail_offset.y = -10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`0`
-
-![tail_offset.y = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`+10`
-
-![tail_offset.y = +10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-### Debug
-
-**`debug.show_outline`** — Draw white (bitmap bounds) and red (visible pixels) outline boxes plus a green `+` at the trail start.
-
-`off`
-
-![debug.show_outline = off](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
-
-`on`
-
-![debug.show_outline = on](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+`15 15`  
+![tail_offset.y = +10](./images/tail_offset.15.15.gif)
 
 ## Above the taskbar and Start menu
 
@@ -471,14 +372,14 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 8. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
 9. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
 
-### Settings & interpolation
+### Settings & blending
 
 - `LoadSettings` uses `ReadStringSetting`, `ParseFloatList`, `SplitAndTrim`, and `ParseHexColor`, and precomputes color band boundaries (`settings.colorBandStart`/`colorBandEnd`) and opacity alphas (`settings.opacityValues`, stored as 0–1) so the hot path does no parsing or per-frame allocation. `LoadCommonTrailSettings(prefix)` reads the settings shared by both styles (trail mode, tail duration/size, timeout, opacity) from `ghostOptions` or `simpleLineOptions`, and `LoadColorSettings(prefix, defaultColor)` reads the per-style color gradient into `settings.activeColorsRGB` (and precomputes the ghost tint samples into `settings.ghostTints`); `TrailPointBudget`/`AutoPointSpacing` hold the shared point-count and spacing formulas.
-- `GetBlendedColor`, `InterpolateValues`, and `InterpolateOpacity` are allocation-free; `Ease` centralizes the easing curves (`linear`/`smoothstep`/`ease_in`/`ease_out`).
+- `GetBlendedColor`, `InterpolateValues`, and `InterpolateOpacity` are allocation-free; `Ease` applies the smoothstep easing curve.
 
 ### Cursor geometry
 
-`UpdateCursorCenterOffset` caches, per `HCURSOR`: the bitmap-center offset (for the debug boxes), the visible-pixel-center offset (the line-style trail origin), the hotspot, the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt only when the cursor handle changes. `ComputeCursorGeom` holds the shared computation; `GetCursorGeom` lazily computes geometry for any cursor handle still referenced by the trail (so the ghost style can draw older images after an image change). Ghost samples store the raw cursor hotspot, and the ghost renderer anchors each copy by its own image's hotspot, so a copy lands exactly where that cursor image was — independent of the render thread's offset refresh. The ghost style also builds and caches D2D bitmaps per `HCURSOR` via `EnsureCursorBitmap`, rendering the cursor with `DrawIconEx` at the on-screen pixel size (color + mask + anti-aliased alpha) so copies are blitted 1:1 without resampling. The `ghostOptions.color` gradient (when set) is baked into the cached pixels by sampling it at `kGhostTintSteps` ratios (one bitmap per sample; an empty color list yields a single untinted variant), and `GetCursorBitmap(hCursor, ratio)` selects the nearest variant for each copy. `color.replace.mode` picks the pixels to recolor: `whole` swaps every non-transparent pixel; `auto` and `custom` split each pixel between two reference colors — the replace color (`auto` uses the cursor's enclosed center color from `AnalyzeCursorColors`, falling back to the largest region when nothing is enclosed; `custom` uses `color.replace.custom`) and a keep color (the largest boundary/outline region, or the region farthest from the replace color) — swapping pixels closer to the replace color with a small softness band around the midpoint, so anti-aliased transitions split cleanly instead of leaving a halo. Both caches are released with the render target.
+`UpdateCursorCenterOffset` caches, per `HCURSOR`: the bitmap-center offset (for the debug boxes), the visible-pixel-center offset (the line-style trail origin), the hotspot, the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt only when the cursor handle changes. `ComputeCursorGeom` holds the shared computation; `GetCursorGeom` lazily computes geometry for any cursor handle still referenced by the trail (so the ghost style can draw older images after an image change). Ghost samples store the raw cursor hotspot, and the ghost renderer anchors each copy by its own image's hotspot, so a copy lands exactly where that cursor image was — independent of the render thread's offset refresh. The ghost style also builds and caches D2D bitmaps per `HCURSOR` via `EnsureCursorBitmap`, rendering the cursor with `DrawIconEx` at the on-screen pixel size (color + mask + anti-aliased alpha) so copies are blitted 1:1 without resampling. The `ghostOptions.color` gradient (when set) is baked into the cached pixels by sampling it at `kGhostTintSteps` ratios (one bitmap per sample; an empty color list yields a single untinted variant), and `GetCursorBitmap(hCursor, ratio)` selects the nearest variant for each copy. `color.replace.mode` picks the pixels to recolor: `whole` swaps every non-transparent pixel; `auto` splits each pixel between two reference colors — the replace color (the cursor's enclosed center color from `AnalyzeCursorColors`, falling back to the largest region when nothing is enclosed) and a keep color (the largest boundary/outline region) — swapping pixels closer to the replace color with a small softness band around the midpoint; `custom` replaces pixels whose color matches `color.replace.custom` (soft falloff so anti-aliased edges blend), leaving every other color untouched. Both caches are released with the render target.
 
 ### Lifecycle
 

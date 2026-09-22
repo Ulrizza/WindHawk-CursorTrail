@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.17
+## 0.18
 - Settings UX pass before release:
   - `simpleLineOptions.antialiasing` is now a boolean switch instead of a True/False dropdown.
   - Fixed `%%` rendering literally in the Width and Size descriptions (now `%`).
@@ -17,6 +17,12 @@
 - Fixed the trail painting older parts over newer ones at self-crossings: both style renderers now draw tail → head so the newest segment/copy is on top.
 - Changed the Cursor ghost defaults: `ghostOptions.timeBased.tail_duration` 500 → 300 ms and `ghostOptions.opacity.values` "100,20" → "50,20".
 - Reordered the settings in the mod description and README to mirror the Windhawk settings page exactly: `Style`, `Simple line options`, `Cursor ghost options`, `Enable/disable hotkey`, `Trail offset`, `Debug` (README settings split into the same per-group tables).
+- Added a `debug.show_tail_preview` setting: a static 500px horizontal preview of the trail's appearance (same style/width/color/opacity/size/replace gradients, minus the animated parts), positioned to the left of the cursor (flush with its hotspot), so the look can be checked without moving the mouse. It reuses the style renderers (`RenderSimpleLineStyle` / `RenderCursorGhostStyle`); for Cursor ghost the copy count follows the configured Copies when size-based, otherwise the configured spawn spacing.
+- Removed the `ease_in`/`ease_out` color interpolation options (both styles): only `linear` and `smoothstep` remain, and unknown values now fall back to `smoothstep`. The `INTERP_EASE_IN`/`INTERP_EASE_OUT` enum values and their `Ease()` cases are gone too; the enable/disable hotkey animation keeps its ease-in/ease-out math inline.
+- Removed the `simpleLineOptions.trail_origin_on_cursor_change` setting; the trail origin is always smooth now. The `TrailOriginMode` enum, the parsing and the `none`/`immediate` branches are kept (commented/annotated as unused) in case the setting is brought back.
+- Removed the `color.interpolation` setting (both styles): smoothstep is now always used. The `linear` option, the `INTERP_LINEAR` enum value, and the `Ease()` mode parameter are gone.
+- Fixed Cursor ghost `custom` replace mode: it now replaces only pixels matching `color.replace.custom` (soft falloff for anti-aliased edges) and leaves every other color untouched, instead of splitting pixels between the custom color and the auto-picked farthest region (which partially tinted intermediate colors on three-color cursors).
+- Hidden the `debug.show_tail_preview` and `debug.show_outline` settings from the settings UI; the code (preview/outline renderers) remains but is forced off, test-only.
 
 ## 0.16
 - Debug: Show outline now draws 2px boxes, a green trail-start `+` (was blue) with longer arms, and 2px `+` strokes.
