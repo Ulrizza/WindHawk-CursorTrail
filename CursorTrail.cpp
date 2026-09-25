@@ -40,10 +40,10 @@ A fully customizable cursor trail for the Windows desktop.
 Type of trail.
 
 `style: simple_line`: a line whose width, color, and opacity can change along its length  
-![style = simple_line](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![style = simple_line](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/style.simple_line.gif)
 
 `style: cursor_ghost`: faded copies of the cursor image, each latched where it spawned  
-![style = cursor_ghost](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![style = cursor_ghost](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/style.cursor_ghost.gif)
 
 ### Simple line options
 
@@ -54,10 +54,10 @@ Applies when Style is Simple line.
 How the trail disappears.
 
 `simpleLineOptions.trail_mode: time_based`: each part of the trail fades after the Tail duration  
-![simpleLineOptions.trail_mode = time_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.trail_mode = time_based](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.trail_mode.time_based.gif)
 
 `simpleLineOptions.trail_mode: size_based`: keeps a fixed trail length even when the cursor stops  
-![simpleLineOptions.trail_mode = size_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.trail_mode = size_based](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.trail_mode.size_based.gif)
 
 #### Time based
 
@@ -68,13 +68,13 @@ Applies when Trail mode is Time based.
 How long each trail segment stays visible, in milliseconds. Minimum 20.
 
 `100`  
-![simpleLineOptions.timeBased.tail_duration = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.timeBased.tail_duration = 100](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.timeBased.tail_duration.100.gif)
 
 `300`  
-![simpleLineOptions.timeBased.tail_duration = 300](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.timeBased.tail_duration = 300](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.timeBased.tail_duration.300.gif)
 
 `1000`  
-![simpleLineOptions.timeBased.tail_duration = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.timeBased.tail_duration = 1000](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.timeBased.tail_duration.1000.gif)
 
 #### Size based
 
@@ -85,26 +85,26 @@ Applies when Trail mode is Size based.
 Maximum trail length in pixels. Minimum 20.
 
 `100`  
-![simpleLineOptions.sizeBased.tail_size = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.sizeBased.tail_size = 100](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.sizeBased.tail_size.100.gif)
 
 `500`  
-![simpleLineOptions.sizeBased.tail_size = 500](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.sizeBased.tail_size = 500](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.sizeBased.tail_size.500.gif)
 
 `1000`  
-![simpleLineOptions.sizeBased.tail_size = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.sizeBased.tail_size = 1000](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.sizeBased.tail_size.1000.gif)
 
 ##### Timeout
 
 Milliseconds of inactivity before the trail starts fading (using the Time based tail duration). 0 = trail always visible.
 
 `0`  
-![simpleLineOptions.sizeBased.timeout = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.sizeBased.timeout = 0](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.sizeBased.timeout.0.gif)
 
 `500`  
-![simpleLineOptions.sizeBased.timeout = 500](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.sizeBased.timeout = 500](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.sizeBased.timeout.500.gif)
 
 `1000`  
-![simpleLineOptions.sizeBased.timeout = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.sizeBased.timeout = 1000](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.sizeBased.timeout.1000.gif)
 
 #### Width
 
@@ -113,16 +113,16 @@ Milliseconds of inactivity before the trail starts fading (using the Time based 
 Comma-separated stroke widths in pixels from head to tail (e.g. "2,1" for a tapered trail, or "10,1,10,1" for a pulsing trail). Each value gets an equal share; repeat to widen (e.g. "2,2,2,2,1" = 80% at 2, 20% at 1). Minimum 1.
 
 `5`  
-![simpleLineOptions.width.values = 5](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.width.values = 5](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.width.values.5.gif)
 
 `5,0`  
-![simpleLineOptions.width.values = 5,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.width.values = 5,0](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.width.values.5.0.gif)
 
 `1,1,1,10`  
-![simpleLineOptions.width.values = 1,1,1,10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.width.values = 1,1,1,10](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.width.values.1.1.1.10.gif)
 
 `10,1,10,1,10,1`  
-![simpleLineOptions.width.values = 10,1,10,1,10,1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.width.values = 10,1,10,1,10,1](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.width.values.10.1.10.1.10.1.gif)
 
 #### Color
 
@@ -131,26 +131,26 @@ Comma-separated stroke widths in pixels from head to tail (e.g. "2,1" for a tape
 Single hex (RRGGBB without #, e.g. 000000 for black) or comma-separated list for a gradient from head to tail (e.g. 000000,FF0000,FFFFFF for black->red->white). Each color gets an equal share; repeat to widen. Invalid entries fall back to black.
 
 `FF0000`  
-![simpleLineOptions.color.values = FF0000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.color.values = FF0000](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.color.values.ff0000.gif)
 
 `FF0000,FF7F00,FFFF00,7FFF00,00FF00,00FFFF,0000FF,4B0082,8B00FF`  
-![simpleLineOptions.color.values = FF0000,FF7F00,FFFF00,7FFF00,00FF00,00FFFF,0000FF,4B0082,8B00FF](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.color.values = FF0000,FF7F00,FFFF00,7FFF00,00FF00,00FFFF,0000FF,4B0082,8B00FF](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.color.values.rainbow.gif)
 
 ##### Blend width
 
 Percentage of each transition spent blending (0 = pure bands, 100 = full gradient). 50 with red,blue gives 25% hard red, 50% blend, 25% hard blue. Only applies with two or more colors.
 
 `0`  
-![simpleLineOptions.color.blend_width = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
-![simpleLineOptions.color.blend_width = 0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+![simpleLineOptions.color.blend_width = 0](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.color.blend_width.0.png)  
+![simpleLineOptions.color.blend_width = 0](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.color.blend_width.0.gif)  
 
 `50`  
-![simpleLineOptions.color.blend_width = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
-![simpleLineOptions.color.blend_width = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+![simpleLineOptions.color.blend_width = 50](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.color.blend_width.50.png)  
+![simpleLineOptions.color.blend_width = 50](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.color.blend_width.50.gif)  
 
 `100`  
-![simpleLineOptions.color.blend_width = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
-![simpleLineOptions.color.blend_width = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+![simpleLineOptions.color.blend_width = 100](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.color.blend_width.100.png)  
+![simpleLineOptions.color.blend_width = 100](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.color.blend_width.100.gif)  
 
 #### Opacity
 
@@ -159,23 +159,23 @@ Percentage of each transition spent blending (0 = pure bands, 100 = full gradien
 Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade, or "100,0,100" for a pulse). Each value gets an equal share; repeat to widen. Leave one value for uniform opacity.
 
 `100`  
-![simpleLineOptions.opacity.values = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.opacity.values = 100](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.opacity.values.100.gif)
 
 `100,0`  
-![simpleLineOptions.opacity.values = 100,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.opacity.values = 100,0](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.opacity.values.100.0.gif)
 
 `100,0,100`  
-![simpleLineOptions.opacity.values = 100,0,100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.opacity.values = 100,0,100](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.opacity.values.100.0.100.gif)
 
 #### Antialiasing
 
 Smooth the trail edges.
 
 `on`  
-![simpleLineOptions.antialiasing = on](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.antialiasing = on](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.antialiasing.on.gif)
 
 `off`  
-![simpleLineOptions.antialiasing = off](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![simpleLineOptions.antialiasing = off](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/simpleLineOptions.antialiasing.off.gif)
 
 ### Cursor ghost options
 
@@ -186,10 +186,10 @@ Applies when Style is Cursor ghost.
 How the copies disappear.
 
 `ghostOptions.trail_mode: time_based`: each copy fades after the Tail duration  
-![ghostOptions.trail_mode = time_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.trail_mode = time_based](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.trail_mode.time_based.gif)
 
 `ghostOptions.trail_mode: size_based`: keeps a fixed number of copies even when the cursor stops  
-![ghostOptions.trail_mode = size_based](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.trail_mode = size_based](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.trail_mode.size_based.gif)
 
 #### Time based
 
@@ -200,13 +200,13 @@ Applies when Trail mode is Time based.
 How long each cursor copy stays visible, in milliseconds. Minimum 20.
 
 `100`  
-![ghostOptions.timeBased.tail_duration = 100](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.timeBased.tail_duration = 100](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.timeBased.tail_duration.100.gif)
 
 `300`  
-![ghostOptions.timeBased.tail_duration = 300](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.timeBased.tail_duration = 300](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.timeBased.tail_duration.300.gif)
 
 `1000`  
-![ghostOptions.timeBased.tail_duration = 1000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.timeBased.tail_duration = 1000](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.timeBased.tail_duration.1000.gif)
 
 #### Size based
 
@@ -217,30 +217,30 @@ Applies when Trail mode is Size based.
 Number of cursor copies in the trail (Size based mode). Minimum 2, maximum 512.
 
 `5`  
-![ghostOptions.sizeBased.tail_size = 5](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.sizeBased.tail_size = 5](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.sizeBased.tail_size.5.gif)
 
 `20`  
-![ghostOptions.sizeBased.tail_size = 20](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.sizeBased.tail_size = 20](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.sizeBased.tail_size.20.gif)
 
 `50`  
-![ghostOptions.sizeBased.tail_size = 50](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.sizeBased.tail_size = 50](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.sizeBased.tail_size.50.gif)
 
 ##### Timeout
 
 Milliseconds of inactivity before the trail starts fading (using the Time based tail duration). 0 = trail always visible.
 
 `500`  
-![ghostOptions.sizeBased.timeout = 500](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.sizeBased.timeout = 500](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.sizeBased.timeout.500.gif)
  
 #### Copy spacing
 
 Extra distance in pixels added between cursor copies (0 = automatic, based on the copy count). Maximum 200.
 
 `10`  
-![ghostOptions.spacing = 10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.spacing = 10](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.spacing.10.gif)
 
 `25`  
-![ghostOptions.spacing = 25](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.spacing = 25](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.spacing.25.gif)
 
 #### Size
 
@@ -249,13 +249,13 @@ Extra distance in pixels added between cursor copies (0 = automatic, based on th
 Comma-separated size multipliers from head to tail (1 = same size, 0.8 = 80%, 2 = twice). Each value gets an equal share; repeat to widen (e.g. "1,0.5,1,0.5"). Avoid values above 1 (upscaled copies look pixelated); use the Windows cursor size setting to enlarge the cursor.
 
 `1`  
-![ghostOptions.size.values = 1](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.size.values = 1](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.size.values.1.png)
 
 `1,0`  
-![ghostOptions.size.values = 1,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.size.values = 1,0](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.size.values.1.0.png)
 
 `1,0.2,1,0.2`  
-![ghostOptions.size.values = 1,0.2,1,0.2](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.size.values = 1,0.2,1,0.2](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.size.values.1.02.1.02.png)
 
 #### Opacity
 
@@ -264,10 +264,10 @@ Comma-separated size multipliers from head to tail (1 = same size, 0.8 = 80%, 2 
 Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for full fade). Each value gets an equal share; repeat to widen.
 
 `100,0`  
-![ghostOptions.opacity.values = 100,0](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.opacity.values = 100,0](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.opacity.values.100.0.png)
 
 `100,20,100,20`  
-![ghostOptions.opacity.values = 100,20,100,20](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.opacity.values = 100,20,100,20](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.opacity.values.100.20.100.20.png)
 
 #### Color
 
@@ -276,15 +276,15 @@ Comma-separated opacity percentages (0-100) from head to tail (e.g. "100,0" for 
 Leave empty to keep the cursor's own colors. Otherwise a single hex (RRGGBB without #) or comma-separated list for a gradient from head to tail; pixels matching the Replace color are recolored to this value (FFFFFF makes white copies). Each color gets an equal share; repeat to widen. Invalid entries fall back to black. A single color disables Blend width.
 
 `(empty)`  
-![ghostOptions.color.values = empty](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
-![ghostOptions.color.values = empty](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
-![ghostOptions.color.values = empty](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+![ghostOptions.color.values = empty](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.color.values.empty.black.gif)  
+![ghostOptions.color.values = empty](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.color.values.empty.pink.gif)  
+![ghostOptions.color.values = empty](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.color.values.empty.green.gif)  
 
 `ff0000`  
-![ghostOptions.color.values = ff0000](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.color.values = ff0000](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.color.values.ff0000.gif)
 
 `ff00ff,00ffff,ffff00`  
-![ghostOptions.color.values = ff00ff,00ffff,ffff00](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.color.values = ff00ff,00ffff,ffff00](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.color.values.ff00ff.00ffff.ffff00.gif)
 
 ##### Blend width
 
@@ -299,10 +299,10 @@ Only used when Color > Values is set.
 Which cursor pixels to recolor.
 
 `ghostOptions.color.replace.mode: auto`: the cursor's enclosed center color (ignoring the outline/contour; falls back to the largest area when nothing is enclosed)  
-![ghostOptions.color.replace.mode = auto](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.color.replace.mode = auto](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.color.replace.mode.auto.gif)
 
 `ghostOptions.color.replace.mode: whole`: every non-transparent pixel  
-![ghostOptions.color.replace.mode = whole](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.color.replace.mode = whole](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.color.replace.mode.whole.gif)
 
 `ghostOptions.color.replace.mode: custom`: the Custom color defined in the next setting (see below for examples) 
 
@@ -311,11 +311,11 @@ Which cursor pixels to recolor.
 Original cursor color to replace with the Values color (used when Mode is Custom). Set 000000 to recolor a black cursor body, or FFFFFF to recolor a white outline.
 
 `ffffff`  
-![ghostOptions.color.replace.mode = custom](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+![ghostOptions.color.replace.mode = custom](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.color.replace.mode.custom.ffffff.gif)  
 `f7bb0e`    
-![ghostOptions.color.replace.mode = custom](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)  
+![ghostOptions.color.replace.mode = custom](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.color.replace.mode.custom.f7bb0e.gif)  
 `000000`    
-![ghostOptions.color.replace.mode = custom](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![ghostOptions.color.replace.mode = custom](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/ghostOptions.color.replace.mode.custom.000000.gif)
 
 ### Enable/disable hotkey
 
@@ -326,7 +326,7 @@ Press to toggle the trail on or off. Format: Modifier+Key (e.g. Ctrl+Alt+T). Mod
 #### Animation
 
 Show a circle animation when the hotkey toggles the trail.    
-![hotkeyOptions.animate = on](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![hotkeyOptions.animate = on](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/hotkeyOptions.animate.gif)
 
 The animation is a circle outline (2px, in the cursor's color, centered on the trail start and following the cursor): it grows and fades out when disabling, and shrinks and fades in when enabling.  
 
@@ -334,10 +334,10 @@ The animation is a circle outline (2px, in the cursor's color, centered on the t
 Fine-tune the trail origin horizontally in pixels (auto-centered by default, 0 = no adjustment)
 
 `0 0`  
-![tail_offset.x = -10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![tail_offset.x = -10](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/tail_offset.0.0.gif)
 
 `15 15`  
-![tail_offset.y = +10](https://github.com/user-attachments/assets/e41ef1cb-33ff-412c-b707-58211402374d)
+![tail_offset.y = +10](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/tail_offset.15.15.gif)
 
 ## Above the taskbar and Start menu
 
