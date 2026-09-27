@@ -4,6 +4,7 @@
 // @description     A fully customizable cursor trail overlay for the Windows desktop.
 // @version         0.18
 // @author          Ulrizza
+// @github          https://github.com/Ulrizza
 // @license         MIT
 // @include         windhawk.exe
 // @compilerOptions -ld2d1 -lole32 -lgdi32 -lshell32 -lwindowscodecs -lwinmm -lshcore
@@ -23,6 +24,14 @@ If you see any bug or want more settings/features, add an issue on the [Github r
 I cannot promise you anything because I don't have much free time but I enjoyed making this plugin so I'll do my best 🤘
 
 **Disclamer:** I used AI to make this project, I just wanted a custom cursor trail and now I have it so I'm happy. If you are botherded by that, just don't install it.
+
+## Installation
+
+1. Install [Windhawk](https://windhawk.net/).
+2. Install **Cursor trail** from the Windhawk mods catalog, or import the source
+   (`CursorTrail.cpp`) from this repository via the Windhawk mod editor.
+3. On Windows 11, also install the companion **Cursor trail helper - always on top**
+   mod so the trail draws above the taskbar and Start menu.
 
 ## The two styles
 

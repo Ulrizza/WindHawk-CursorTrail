@@ -4,6 +4,7 @@
 // @description     Places the Cursor trail overlay above the taskbar and Start menu by moving it to a higher Z-order band
 // @version         1.0
 // @author          Ulrizza
+// @github          https://github.com/Ulrizza
 // @license         MIT
 // @include         explorer.exe
 // ==/WindhawkMod==
