@@ -1,6 +1,15 @@
 # WindHawk - Cursor Trail
 
 A fully customizable cursor trail for the Windows desktop.  
+  
+## Intro
+
+I always liked the original Windows cursor trail, but it was too limited, so I made this one. I personally enjoy it very much so I want to share it 😊
+
+If you see any bug or want more settings/features, add an issue on the [Github repo](https://github.com/Ulrizza/WindHawk-CursorTrail)!  
+I cannot promise you anything because I don't have much free time but I enjoyed making this plugin so I'll do my best 🤘
+
+**Disclamer:** I used AI to make this project, I just wanted a custom cursor trail and now I have it so I'm happy. If you are botherded by that, just don't install it.
 
 ## The two styles
 
@@ -388,3 +397,9 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 - `WhTool_ModUninit` — signals the poll thread, kills the timer, and posts `WM_QUIT`.
 - The overlay thread registers the `hotkeyOptions.key` setting (`ApplyHotkey`) right after creating the window and unregisters it before destroying the window. `WM_HOTKEY` flips `runtime.trailEnabled`, which suppresses sampling/rendering like the fullscreen-game path does, and (when `hotkeyOptions.animate` is on) calls `StartToggleEffect` to play the circle animation centered on the trail head (disable: grows + fades out, ease in; enable: shrinks + fades in, ease out; 400 ms, 2px outline, diameter 6× the cursor, colored by `GetCursorColor`'s ghost-`auto` pick, following the cursor).
 - The `Wh_ModInit` / `Wh_ModAfterInit` / `Wh_ModUninit` block at the bottom of the file is Windhawk's tool-mod launcher boilerplate and should be left as-is.
+
+## Licence
+
+This project is licensed under the MIT License. You're free to use, modify, and
+redistribute the code as long as you keep the original copyright notice and
+credit the author (Ulrizza). See [LICENSE](LICENSE) for the full text.
