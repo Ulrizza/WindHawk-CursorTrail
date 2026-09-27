@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19
+- Public-release prep:
+  - Added `@github` metadata to both mod files (required for catalog submission).
+  - Added `## Intro` and `## Installation` sections to the mod description (Windhawk readme), matching the README.
+  - Added a `## Licence` section to the README and description, plus a `LICENSE` file (MIT).
+  - Cleaned up `.gitignore`.
+
 ## 0.18
 - Settings UX pass before release:
   - `simpleLineOptions.antialiasing` is now a boolean switch instead of a True/False dropdown.
