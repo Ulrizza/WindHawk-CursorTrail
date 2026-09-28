@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0
+- Development-tips compliance and cleanup:
+  - Adopted `WindhawkUtils::StringSetting` (via `ReadStringSetting`) and `WindhawkUtils::SetFunctionHook` (helper mod) from `windhawk_utils.h`.
+  - Removed the dead code left behind by the removed "Trail origin on cursor change" setting: the `TrailOriginMode` enum, the `Settings::trailOriginMode`/`trailOriginOnCursorChange` fields, `CursorState::frozenCursorOffset`, and the unreachable `none`/`immediate` branches in `PollThreadProc` and `BuildTrailPoints`.
+- Cursor trail helper - always on top fixes:
+  - Made the cross-thread `g_iamKey`/`g_unhookPending` state `std::atomic` (was `volatile`).
+  - The runtime unhook now calls `Wh_ApplyHookOperations()` so it actually takes effect.
+  - Removed the redundant, out-of-window `Wh_RemoveFunctionHook` call from `Wh_ModUninit`.
+
 ## 0.19
 - Public-release prep:
   - Added `@github` metadata to both mod files (required for catalog submission).

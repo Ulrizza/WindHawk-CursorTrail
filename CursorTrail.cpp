@@ -2,7 +2,7 @@
 // @id              cursor-trail
 // @name            Cursor trail
 // @description     A fully customizable cursor trail overlay for the Windows desktop.
-// @version         0.19
+// @version         1.0
 // @author          Ulrizza
 // @github          https://github.com/Ulrizza
 // @license         MIT
@@ -369,8 +369,8 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 
 | Instance | Type | Purpose |
 |---|---|---|
-| `settings` | `Settings` | Parsed settings (tail geometry, style, width/color/opacity, origin mode). Written by `LoadSettings()`, read by all threads. |
-| `cursor` | `CursorState` | Cursor geometry cache: `centerOffset`/`visualOffset`/`frozenOffset` (mutex-protected) plus render-thread-only debug dims and the per-`HCURSOR` `geomCache`. |
+| `settings` | `Settings` | Parsed settings (tail geometry, style, width/color/opacity, trail offset). Written by `LoadSettings()`, read by all threads. |
+| `cursor` | `CursorState` | Cursor geometry cache: `centerOffset`/`visualOffset` (mutex-protected) plus render-thread-only debug dims and the per-`HCURSOR` `geomCache`. |
 | `origin` | `OriginTransition` | Poll-thread-owned ease-in-out state for the trail-origin glide on cursor-image change. |
 | `render` | `RenderResources` | Direct2D factory/target/brushes, stroke style, the cached backbuffer, and the per-`HCURSOR` `cursorBitmapCache` (tinted bitmap variants) used by the ghost style. Render-thread-only. |
 | `runtime` | `Runtime` | Overlay window/threads, the `history` deque, atomics, multimedia timer, and per-frame render state. |
@@ -384,7 +384,7 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 ### Locking model
 
 - `runtime.historyMutex` protects `runtime.history` (poll + render threads).
-- `cursor.offsetMutex` protects `cursor.centerOffset` / `cursor.visualOffset` / `cursor.frozenOffset` (written by render thread, read by poll thread).
+- `cursor.offsetMutex` protects `cursor.centerOffset` / `cursor.visualOffset` (written by render thread, read by poll thread).
 - Lock order is always `runtime.historyMutex` → `cursor.offsetMutex`.
 - `runtime.isGameRunning`, `runtime.cursorHidden`, `runtime.renderScheduled`, and `runtime.trailEnabled` are atomics.
 - `origin.*`, `render.*`, and the cursor debug dimensions are single-thread owned (see table above).
@@ -590,6 +590,7 @@ credit the author (Ulrizza). See [LICENSE](LICENSE) for the full text.
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <windhawk_utils.h>
 
 // Position sample used by the polling thread and spatial decimation in the render loop.
 struct Sample {
@@ -599,11 +600,6 @@ struct Sample {
 };
 
 // Global state variables
-
-// How the trail origin reacts to cursor image changes (Simple line only).
-// The "Trail origin on cursor change" setting was removed, so only ORIGIN_SMOOTH
-// is used now; ORIGIN_NONE and ORIGIN_IMMEDIATE are kept for reference.
-enum TrailOriginMode { ORIGIN_NONE, ORIGIN_IMMEDIATE, ORIGIN_SMOOTH };
 
 // Number of tint samples baked across the ghost color gradient. A flat color
 // needs only one; otherwise the continuous gradient is quantized to this many
@@ -653,8 +649,6 @@ struct Settings {
     Rgb   ghostReplaceColor = { 1.0f, 1.0f, 1.0f };   // Custom: original cursor color to swap for the tint
 
     std::wstring    activeStyle = L"simple_line";
-    std::wstring    trailOriginOnCursorChange = L"smooth";
-    TrailOriginMode trailOriginMode = ORIGIN_SMOOTH;
 
     std::vector<float> simpleLineWidths;              // parsed width values, one per stop
     std::vector<Rgb>   activeColorsRGB;               // pre-parsed colors of the active style
@@ -679,15 +673,14 @@ struct CursorGeom {
     int   visLeft = 0, visTop = 0, visRight = 0, visBottom = 0;
 };
 
-// Cursor geometry cache. The center/visual/frozen offsets are shared with the
-// poll thread via offsetMutex; the debug dimensions and geomCache below are
+// Cursor geometry cache. The center/visual offsets are shared with the poll
+// thread via offsetMutex; the debug dimensions and geomCache below are
 // render-thread-only.
 struct CursorState {
     HCURSOR cachedCursor = NULL;
     POINT   centerOffset = { 0, 0 };  // hotspot → bitmap center (anchors debug boxes)
     POINT   visualOffset = { 0, 0 };  // hotspot → visible-pixel center (trail origin)
-    POINT   frozenCursorOffset = { 0, 0 };  // snapshot of the trail origin at trail start
-    std::mutex offsetMutex;                 // protects center/visual/frozen offsets (read by poll thread)
+    std::mutex offsetMutex;                 // protects center/visual offsets (read by poll thread)
 
     int   bmWidth = 0, bmHeight = 0;        // bitmap dims + DPI scale for the debug boxes
     float dpiScaleX = 1.0f, dpiScaleY = 1.0f;
@@ -852,11 +845,12 @@ static bool ParseHexColor(const std::wstring& hex, float& r, float& g, float& b)
 }
 
 // Reads a string setting, returning def when the setting is missing or empty.
-// Wh_FreeStringSetting is handled here; the returned copy is owned by the caller.
+// The RAII WindhawkUtils::StringSetting frees the string on destruction; the
+// returned copy is owned by the caller.
 static std::wstring ReadStringSetting(const wchar_t* key, const std::wstring& def) {
-    PCWSTR s = Wh_GetStringSetting(key);
+    auto setting = WindhawkUtils::StringSetting::make(key);
+    PCWSTR s = setting.get();
     std::wstring r = (s && *s) ? std::wstring(s) : def;
-    if (s) Wh_FreeStringSetting(s);
     return r;
 }
 
@@ -1144,7 +1138,6 @@ void LoadSettings() {
         if (settings.ghostSpacing < 0) settings.ghostSpacing = 0;
         if (settings.ghostSpacing > 200) settings.ghostSpacing = 200;
         settings.antialiasing = true;                  // ghost always uses linear bitmap interpolation
-        settings.trailOriginMode = ORIGIN_IMMEDIATE;   // unused by ghost (samples store the raw hotspot)
 
         // Distance the cursor must travel before a new ghost copy is stamped.
         // Ghosts are latched at their spawn position, so this controls the gap
@@ -1197,28 +1190,6 @@ void LoadSettings() {
         settings.ghostTints.clear();
 
         settings.antialiasing = Wh_GetIntSetting(L"simpleLineOptions.antialiasing") != 0;
-
-        // "Trail origin on cursor change" was removed: the origin is always
-        // smooth now. The parsing and the other TrailOriginMode values are kept
-        // below for reference in case the setting is brought back.
-        settings.trailOriginMode = ORIGIN_SMOOTH;
-        /*
-        settings.trailOriginOnCursorChange = ReadStringSetting(L"simpleLineOptions.trail_origin_on_cursor_change", L"smooth");
-        if (settings.trailOriginOnCursorChange != L"none" &&
-            settings.trailOriginOnCursorChange != L"immediate" &&
-            settings.trailOriginOnCursorChange != L"smooth") {
-            settings.trailOriginOnCursorChange = L"smooth";
-        }
-
-        // Re-anchor the trail origin on cursor image changes.
-        if (settings.trailOriginOnCursorChange == L"immediate") {
-            settings.trailOriginMode = ORIGIN_IMMEDIATE;
-        } else if (settings.trailOriginOnCursorChange == L"smooth") {
-            settings.trailOriginMode = ORIGIN_SMOOTH;
-        } else {
-            settings.trailOriginMode = ORIGIN_NONE;
-        }
-        */
     }
 
     if (settings.tailDuration < 20) settings.tailDuration = 20;
@@ -2296,29 +2267,18 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             }
 
             // === TRAIL ORIGIN — choose the offset for this sample ===
-            // The "Trail origin on cursor change" setting was removed, so
-            // trailOriginMode is always ORIGIN_SMOOTH and only that branch is
-            // reachable; the ORIGIN_NONE / ORIGIN_IMMEDIATE branches are kept
-            // for reference. Smooth follows the current cursor's visual center
-            // so the trail head lands correctly after a cursor image change
+            // The "Trail origin on cursor change" setting was removed; the
+            // origin always glides smoothly to the cursor's visual center so the
+            // trail head lands correctly after a cursor image change
             // (arrow → I-beam).
             POINT originOffset;
-            if (settings.trailOriginMode != ORIGIN_SMOOTH) {
-                // Reset smooth-transition state so re-entering smooth mode
-                // snaps cleanly instead of accumulating a stale cursor jump.
-                origin.initialized = false;
-                origin.lastCursorValid = false;
-            }
             if (settings.isGhost) {
                 // Ghost copies are latched at the raw cursor position; the
                 // renderer anchors each image by its own hotspot, so no trail
                 // origin offset is applied here. This avoids using a stale
                 // offset from the previous cursor image right after a change.
                 originOffset = { 0, 0 };
-            } else if (settings.trailOriginMode == ORIGIN_IMMEDIATE) {
-                std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
-                originOffset = cursor.visualOffset;
-            } else if (settings.trailOriginMode == ORIGIN_SMOOTH) {
+            } else {
                 POINT target;
                 {
                     std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
@@ -2379,12 +2339,6 @@ DWORD WINAPI PollThreadProc(LPVOID) {
 
                 originOffset.x = RoundToLong(origin.smoothedOffsetX);
                 originOffset.y = RoundToLong(origin.smoothedOffsetY);
-            } else {
-                std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
-                if (runtime.history.empty()) {
-                    cursor.frozenCursorOffset = cursor.visualOffset;
-                }
-                originOffset = cursor.frozenCursorOffset;
             }
 
             POINT newPt = { pt.x + originOffset.x - vX,
@@ -2491,11 +2445,7 @@ static void BuildTrailPoints(const POINT& pt, int vX, int vY,
         POINT originOffset = { 0, 0 };
         if (!settings.isGhost) {
             std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
-            // ORIGIN_NONE is unreachable (the setting was removed); kept for
-            // reference.
-            originOffset = (settings.trailOriginMode == ORIGIN_NONE)
-                ? cursor.frozenCursorOffset
-                : cursor.visualOffset;
+            originOffset = cursor.visualOffset;
         }
         POINT headPt = { pt.x + originOffset.x - vX,
                          pt.y + originOffset.y - vY };
@@ -2979,8 +2929,8 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
         }
     } else {
         // Trail active — update cursor appearance caches. The poll thread
-        // owns trail-origin selection (frozen when runtime.history is empty, unless
-        // settings.trailOriginMode is Immediate/Smooth) and sample accumulation.
+        // owns trail-origin selection (smooth glide to the cursor's visual
+        // center) and sample accumulation.
         UpdateCursorCenterOffset();
     }
 

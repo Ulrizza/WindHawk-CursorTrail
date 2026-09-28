@@ -49,6 +49,9 @@ reset.
 // ==/WindhawkModReadme==
 
 #include <windows.h>
+#include <windhawk_utils.h>
+
+#include <atomic>
 
 // --- Z-order bands (ZBID) -------------------------------------------------
 enum ZBID {
@@ -72,31 +75,32 @@ static NtUserEnableIAMAccess_t pNtUserEnableIAMAccessOriginal;
 static const wchar_t* kOverlayClass = L"SmearFrameOverlayClass";
 static const DWORD kTargetBand = ZBID_SYSTEM_TOOLS;
 
-static volatile ULONG64 g_iamKey;
+static std::atomic<ULONG64> g_iamKey{0};
 static HANDLE g_stopEvent;
 static HANDLE g_workerThread;
 static HWND g_lastBanded;
 static bool g_hookInstalled;
-static volatile bool g_unhookPending;
+static std::atomic<bool> g_unhookPending{false};
 
 // Captures the IAM access key when the shell calls NtUserEnableIAMAccess.
 // The hook is removed by the worker thread (not from here) once captured.
 static BOOL WINAPI NtUserEnableIAMAccessHook(ULONG64 key, BOOL enable) {
     BOOL result = pNtUserEnableIAMAccessOriginal(key, enable);
-    if (result && g_iamKey == 0 && key != 0) {
-        g_iamKey = key;
-        g_unhookPending = true;
+    if (result && g_iamKey.load() == 0 && key != 0) {
+        g_iamKey.store(key);
+        g_unhookPending.store(true);
         Wh_Log(L"IAM access key captured");
     }
     return result;
 }
 
 static bool ApplyBand(HWND hwnd) {
-    if (g_iamKey) {
-        pNtUserEnableIAMAccess(g_iamKey, TRUE);
+    ULONG64 iamKey = g_iamKey.load();
+    if (iamKey) {
+        pNtUserEnableIAMAccess(iamKey, TRUE);
         BOOL ok = pSetWindowBand(hwnd, nullptr, kTargetBand);
         DWORD err = ok ? ERROR_SUCCESS : GetLastError();
-        pNtUserEnableIAMAccess(g_iamKey, FALSE);
+        pNtUserEnableIAMAccess(iamKey, FALSE);
         if (!ok) {
             Wh_Log(L"SetWindowBand (key) failed: %u", err);
         }
@@ -122,10 +126,11 @@ static DWORD WINAPI BandWorkerThread(LPVOID) {
             break;
         }
 
-        if (g_unhookPending && g_hookInstalled && pNtUserEnableIAMAccess) {
+        if (g_unhookPending.load() && g_hookInstalled && pNtUserEnableIAMAccess) {
             Wh_RemoveFunctionHook((void*)pNtUserEnableIAMAccess);
+            Wh_ApplyHookOperations();
             g_hookInstalled = false;
-            g_unhookPending = false;
+            g_unhookPending.store(false);
             Wh_Log(L"NtUserEnableIAMAccess unhooked");
         }
 
@@ -178,9 +183,9 @@ BOOL Wh_ModInit() {
     }
 
     if (pNtUserEnableIAMAccess) {
-        if (Wh_SetFunctionHook((void*)pNtUserEnableIAMAccess,
-                               (void*)NtUserEnableIAMAccessHook,
-                               (void**)&pNtUserEnableIAMAccessOriginal)) {
+        if (WindhawkUtils::SetFunctionHook(pNtUserEnableIAMAccess,
+                                           NtUserEnableIAMAccessHook,
+                                           &pNtUserEnableIAMAccessOriginal)) {
             g_hookInstalled = true;
             Wh_Log(L"NtUserEnableIAMAccess hooked");
         } else {
@@ -219,18 +224,14 @@ void Wh_ModUninit() {
         g_stopEvent = nullptr;
     }
 
-    if (g_hookInstalled && pNtUserEnableIAMAccess) {
-        Wh_RemoveFunctionHook((void*)pNtUserEnableIAMAccess);
-        g_hookInstalled = false;
-    }
-
     // Best effort: return the overlay to the desktop band while it still exists.
     HWND hwnd = FindWindowW(kOverlayClass, nullptr);
     if (hwnd && pSetWindowBand) {
-        if (g_iamKey) {
-            pNtUserEnableIAMAccess(g_iamKey, TRUE);
+        ULONG64 iamKey = g_iamKey.load();
+        if (iamKey) {
+            pNtUserEnableIAMAccess(iamKey, TRUE);
             pSetWindowBand(hwnd, nullptr, ZBID_DESKTOP);
-            pNtUserEnableIAMAccess(g_iamKey, FALSE);
+            pNtUserEnableIAMAccess(iamKey, FALSE);
         } else {
             pSetWindowBand(hwnd, nullptr, ZBID_DESKTOP);
         }
