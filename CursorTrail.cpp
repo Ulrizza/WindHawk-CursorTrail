@@ -2468,8 +2468,16 @@ DWORD WINAPI PollThreadProc(LPVOID) {
 // Rebuilding the bitmap invalidates the render target, so it is released here.
 static void EnsureBackbuffer(HDC hdcScreen, int vW, int vH) {
     if (!render.hBitmap || render.cachedVW != vW || render.cachedVH != vH) {
-        if (render.hBitmap) DeleteObject(render.hBitmap);
-        if (render.hdcMem) DeleteDC(render.hdcMem);
+        // Delete the DC before the bitmap: the bitmap is still selected into the
+        // DC and DeleteObject fails for a selected bitmap (leaking it).
+        if (render.hdcMem) {
+            DeleteDC(render.hdcMem);
+            render.hdcMem = NULL;
+        }
+        if (render.hBitmap) {
+            DeleteObject(render.hBitmap);
+            render.hBitmap = NULL;
+        }
 
         render.hdcMem = CreateCompatibleDC(hdcScreen);
         render.hBitmap = CreateCompatibleBitmap(hdcScreen, vW, vH);
@@ -3259,8 +3267,8 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     if (render.pStrokeStyle) { render.pStrokeStyle->Release(); render.pStrokeStyle = nullptr; }
     if (render.pD2DFactory) { render.pD2DFactory->Release(); render.pD2DFactory = nullptr; }
 
-    if (render.hBitmap) DeleteObject(render.hBitmap);
-    if (render.hdcMem) DeleteDC(render.hdcMem);
+    if (render.hdcMem) { DeleteDC(render.hdcMem); render.hdcMem = NULL; }
+    if (render.hBitmap) { DeleteObject(render.hBitmap); render.hBitmap = NULL; }
 
     // Kill the multimedia timer if still running (may have been killed
     // already by WhTool_ModUninit or by EnterIdleIfInactive) and release the
