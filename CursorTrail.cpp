@@ -3237,8 +3237,6 @@ void WINAPI EntryPoint_Hook() {
 }
 
 BOOL Wh_ModInit() {
-    timeBeginPeriod(1);
-
     DWORD sessionId;
     if (ProcessIdToSessionId(GetCurrentProcessId(), &sessionId) &&
         sessionId == 0) {
@@ -3387,8 +3385,6 @@ void Wh_ModSettingsChanged() {
 }
 
 void Wh_ModUninit() {
-    timeEndPeriod(1);
-
     if (g_isToolModProcessLauncher) {
         return;
     }
