@@ -754,8 +754,12 @@ struct Runtime {
     std::atomic<bool> cursorHidden{false};    // set by render thread, read by poll thread
     std::atomic<bool> renderScheduled{false}; // set by MMTimerCallback, cleared by overlay thread
     std::atomic<bool> trailEnabled{true};     // toggled by the enable/disable hotkey; read by both threads
+    std::atomic<bool> overlayIdle{false};     // render timer stopped (set by overlay, read by poll)
+    std::atomic<bool> idleWakePending{false}; // coalesces poll -> overlay kMsgIdleWake posts
     int     sampleRate = 1;                   // polling interval in ms
     MMRESULT mmTimerId = 0;
+    DWORD   lastActiveTime = 0;               // overlay-thread-only; last frame with work
+    bool    periodRaised = false;             // overlay-thread-only; timeBeginPeriod(1) state
 
     DWORD lastMovementTime = 0;               // poll-thread-owned
     POINT lastCursorPos = { 0, 0 };           // previous raw cursor position (movement tracking)
@@ -786,6 +790,12 @@ struct ToggleEffect {
 static const DWORD kEffectDurationMs = 400;
 static const float kEffectDiameterFactor = 6.0f;
 static const float kEffectStrokeWidth = 2.0f;
+
+// Idle handling: the render timer and the 1 ms timer resolution are only kept
+// alive while there is something to draw. See EnterIdleIfInactive/ResumeRenderTimer.
+static const int   kRenderIntervalMs  = 8;   // ~125 Hz render timer
+static const DWORD kIdleGraceMs       = 200; // inactivity before the render timer stops
+static const DWORD kIdlePollIntervalMs = 20; // poll interval while the overlay is idle
 
 ToggleEffect toggleEffect;
 
@@ -860,6 +870,7 @@ static std::wstring ReadStringSetting(const wchar_t* key, const std::wstring& de
 // thread. MOD_NOREPEAT suppresses auto-repeat while the combo is held.
 static const int kHotkeyId = 1;
 static const UINT kMsgApplyHotkey = WM_APP + 1;
+static const UINT kMsgIdleWake = WM_APP + 2;  // poll thread -> overlay: resume rendering
 
 // Splits on '+', trimming spaces and dropping empty tokens.
 static std::vector<std::wstring> SplitOnPlus(const std::wstring& input) {
@@ -2160,6 +2171,72 @@ static void EvictByTime(DWORD now) {
         runtime.history.pop_back();
 }
 
+// Forward declaration: MMTimerCallback is defined later, before OverlayThreadProc.
+void CALLBACK MMTimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
+
+// --- Idle handling ---------------------------------------------------------
+// The render timer and the 1 ms timer resolution are only needed while there is
+// something to draw. When the trail has fully faded, no toggle effect is playing
+// and the cursor is still, the overlay thread stops the multimedia timer and
+// releases the timer resolution; the poll thread then samples at a much slower
+// rate. Cursor movement (or a hotkey / settings change) wakes the overlay.
+
+// Re-arms the render timer and the 1 ms timer resolution. Safe to call when
+// already active. Overlay-thread-only.
+static void ResumeRenderTimer() {
+    runtime.idleWakePending.store(false);
+    runtime.overlayIdle.store(false);
+    if (!runtime.periodRaised) {
+        timeBeginPeriod(1);
+        runtime.periodRaised = true;
+    }
+    if (!runtime.mmTimerId) {
+        runtime.mmTimerId = timeSetEvent(kRenderIntervalMs, 1, MMTimerCallback, 0, TIME_PERIODIC);
+    }
+}
+
+// Called by the overlay thread after a frame that had nothing to draw. If the
+// overlay has been inactive for kIdleGraceMs and the history is empty, stops the
+// render timer and releases the timer resolution. Overlay-thread-only.
+static void EnterIdleIfInactive(DWORD now) {
+    if (runtime.overlayIdle.load()) {
+        return;
+    }
+    if (now - runtime.lastActiveTime < kIdleGraceMs) {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(runtime.historyMutex);
+        if (!runtime.history.empty()) {
+            return;
+        }
+        // Set the flag while holding the lock: the poll thread pushes samples
+        // under the same lock and re-checks the flag, so a sample pushed right
+        // now is guaranteed to wake us again instead of being stranded.
+        runtime.overlayIdle.store(true);
+    }
+
+    if (runtime.mmTimerId) {
+        timeKillEvent(runtime.mmTimerId);
+        runtime.mmTimerId = 0;
+    }
+    if (runtime.periodRaised) {
+        timeEndPeriod(1);
+        runtime.periodRaised = false;
+    }
+}
+
+// Called by the poll thread when the cursor has moved. Coalesces wake requests
+// so at most one kMsgIdleWake is queued at a time.
+static void RequestOverlayWake() {
+    if (runtime.overlayHwnd && !runtime.idleWakePending.exchange(true)) {
+        if (!PostMessage(runtime.overlayHwnd, kMsgIdleWake, 0, 0)) {
+            runtime.idleWakePending.store(false);
+        }
+    }
+}
+
 // High-frequency cursor polling thread.
 // Runs at runtime.sampleRate ms intervals (default 1 ms), pushes sampled positions
 // into runtime.history when the trail is active. All D2D operations remain on the
@@ -2169,8 +2246,15 @@ DWORD WINAPI PollThreadProc(LPVOID) {
     // Match the overlay thread's DPI awareness so coordinate spaces agree.
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    // Wait on the stop event with a runtime.sampleRate ms timeout to drive the loop.
-    while (WaitForSingleObject(runtime.pollStopEvent, runtime.sampleRate) == WAIT_TIMEOUT) {
+    // Wait on the stop event to drive the loop. Sampling runs at runtime.sampleRate
+    // (1 ms) while the overlay is active, and at a much slower kIdlePollIntervalMs
+    // while the overlay is idle so a stationary cursor doesn't keep waking the CPU.
+    for (;;) {
+        DWORD waitMs = runtime.overlayIdle.load() ? kIdlePollIntervalMs
+                                                  : (DWORD)runtime.sampleRate;
+        if (WaitForSingleObject(runtime.pollStopEvent, waitMs) != WAIT_TIMEOUT) {
+            break;
+        }
         // Respect the game-running flag set by SmearTimerProc, and the
         // enable/disable hotkey state.
         if (runtime.isGameRunning.load() || !runtime.trailEnabled.load()) continue;
@@ -2205,6 +2289,10 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             if (runtime.lastCursorValid &&
                 (pt.x != runtime.lastCursorPos.x || pt.y != runtime.lastCursorPos.y)) {
                 runtime.lastMovementTime = now;
+                // If the overlay released its render timer, wake it back up.
+                if (runtime.overlayIdle.load()) {
+                    RequestOverlayWake();
+                }
             }
             runtime.lastCursorPos = pt;
             runtime.lastCursorValid = true;
@@ -2375,10 +2463,6 @@ DWORD WINAPI PollThreadProc(LPVOID) {
     }
     return 0;
 }
-
-// Forward declaration: MMTimerCallback is defined later (before
-// OverlayThreadProc). Forward-declare so the compiler knows the signature.
-void CALLBACK MMTimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
 
 // Allocates/recreates the backbuffer bitmap when the screen size changes.
 // Rebuilding the bitmap invalidates the render target, so it is released here.
@@ -2924,6 +3008,13 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
             bool wasEmpty = runtime.history.empty();
             runtime.history.clear();
             if (wasEmpty && !runtime.needsClear && !effectActive && !previewActive) {
+                // Nothing to draw. If the trail is suppressed because the user
+                // turned it off (not because a game is running), let the overlay
+                // go idle; the hotkey wakes it again. While a game is running we
+                // keep the timer alive so we notice when it exits.
+                if (!gameRunning) {
+                    EnterIdleIfInactive(dwTime);
+                }
                 return;
             }
         }
@@ -2943,6 +3034,8 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
 
     if (!historyEmpty || runtime.needsClear || effectActive || previewActive ||
         (settings.debugShowOutline && cursor.bmWidth > 0 && cursor.bmHeight > 0)) {
+        // Something is being drawn this frame; keep the overlay awake.
+        runtime.lastActiveTime = dwTime;
         HDC hdcScreen = GetDC(NULL);
 
         EnsureBackbuffer(hdcScreen, vW, vH);
@@ -3004,6 +3097,13 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
 
         BlitOverlay(hwnd, hdcScreen, vX, vY, vW, vH, curBBox, hasCurBBox);
     }
+
+    // Nothing was drawn this frame and nothing has been drawn for a while:
+    // release the render timer. Skipped while a game is running so game-exit
+    // detection keeps working.
+    if (!gameRunning) {
+        EnterIdleIfInactive(dwTime);
+    }
 }
 
 // Custom window proc for the overlay. Handles WM_TIMER (posted by the
@@ -3020,7 +3120,17 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         SmearTimerProc(hwnd, uMsg, wParam, GetTickCount());
         return 0;
     }
+    if (uMsg == kMsgIdleWake) {
+        // The poll thread saw movement while the overlay was idle; resume
+        // rendering (and re-arm the render timer / timer resolution).
+        ResumeRenderTimer();
+        runtime.lastActiveTime = GetTickCount();
+        return 0;
+    }
     if (uMsg == WM_HOTKEY) {
+        // A hotkey must work even while the overlay is idle.
+        ResumeRenderTimer();
+        runtime.lastActiveTime = GetTickCount();
         if ((int)wParam == kHotkeyId) {
             bool enabled = !runtime.trailEnabled.load();
             runtime.trailEnabled.store(enabled);
@@ -3030,6 +3140,8 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         return 0;
     }
     if (uMsg == kMsgApplyHotkey) {
+        ResumeRenderTimer();
+        runtime.lastActiveTime = GetTickCount();
         ApplyHotkey(hwnd);
         return 0;
     }
@@ -3113,14 +3225,14 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     // Use a multimedia timer instead of SetTimer. Multimedia timers have ~1ms
     // resolution and are not coalesced like WM_TIMER, giving smoother animation
     // under load. The callback PostMessages the overlay window, keeping all
-    // rendering on this thread.
+    // rendering on this thread. The timer (and the 1 ms resolution) is released
+    // by EnterIdleIfInactive when there is nothing to draw and re-armed by
+    // ResumeRenderTimer on movement or a hotkey.
     timeBeginPeriod(1);
-    // Fixed render interval (8ms = ~125Hz). The render rate setting was removed
-    // because it has no visible effect after decoupling sampling from rendering.
-    // The poll thread samples at 1ms independently; this timer only controls
-    // how often the overlay is redrawn.
-    const int kRenderIntervalMs = 8;
+    runtime.periodRaised = true;
     runtime.mmTimerId = timeSetEvent(kRenderIntervalMs, 1, MMTimerCallback, 0, TIME_PERIODIC);
+
+    runtime.lastActiveTime = GetTickCount();
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
@@ -3151,12 +3263,16 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     if (render.hdcMem) DeleteDC(render.hdcMem);
 
     // Kill the multimedia timer if still running (may have been killed
-    // already by WhTool_ModUninit) and restore default timer resolution.
+    // already by WhTool_ModUninit or by EnterIdleIfInactive) and release the
+    // timer resolution if we still hold it.
     if (runtime.mmTimerId) {
         timeKillEvent(runtime.mmTimerId);
         runtime.mmTimerId = 0;
     }
-    timeEndPeriod(1);
+    if (runtime.periodRaised) {
+        timeEndPeriod(1);
+        runtime.periodRaised = false;
+    }
 
     UnregisterHotKey(runtime.overlayHwnd, kHotkeyId);
     DestroyWindow(runtime.overlayHwnd);

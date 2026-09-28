@@ -6,7 +6,7 @@ Line numbers refer to `mods/cursor-trail.wh.cpp` in the fork.
 ## Required fixes
 
 - [x] 1. Remove `timeBeginPeriod(1)`/`timeEndPeriod(1)` from launcher boilerplate (lines 3240, 3390) — matches wiki snippet verbatim
-- [ ] 2. Add idle state — stop multimedia timer + `timeEndPeriod(1)` when idle, longer poll timeout (`20` ms when idle)
+- [x] 2. Add idle state — stop multimedia timer + `timeEndPeriod(1)` when idle, longer poll timeout (`20` ms when idle)
 - [ ] 3. Fix screen-sized bitmap leak in `EnsureBackbuffer` (lines 2386–2388) — `DeleteDC` before `DeleteObject`
 - [ ] 4a. Resolve companion-mod references in README (submit helper separately, or remove references)
 - [ ] 4b. Rename window class `SmearFrameOverlayClass` → unique name (e.g. from `WH_MOD_ID`)
