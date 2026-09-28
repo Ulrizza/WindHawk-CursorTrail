@@ -1,6 +1,6 @@
 // ==WindhawkMod==
 // @id              cursor-trail
-// @name            Cursor trail
+// @name            Simple Cursor Trail
 // @description     A fully customizable cursor trail overlay for the Windows desktop.
 // @version         1.0
 // @author          Ulrizza
@@ -12,7 +12,7 @@
 
 // ==WindhawkModReadme==
 /*
-# WindHawk - Cursor Trail
+# Simple Cursor Trail
 
 A fully customizable cursor trail for the Windows desktop.  
 
@@ -28,10 +28,8 @@ I cannot promise you anything because I don't have much free time but I enjoyed 
 ## Installation
 
 1. Install [Windhawk](https://windhawk.net/).
-2. Install **Cursor trail** from the Windhawk mods catalog, or import the source
-   (`CursorTrail.cpp`) from this repository via the Windhawk mod editor.
-3. On Windows 11, also install the companion **Cursor trail helper - always on top**
-   mod so the trail draws above the taskbar and Start menu.
+2. Install **Simple Cursor Trail** from the Windhawk mods catalog, or import the
+   source (`CursorTrail.cpp`) from this repository via the Windhawk mod editor.
 
 ## The two styles
 
@@ -41,6 +39,21 @@ I cannot promise you anything because I don't have much free time but I enjoyed 
   where it spawned (they stay put and only fade out). Each copy keeps the exact
   cursor image from when it was sampled, so an image change (e.g. arrow to
   I-beam) appears gradually along the trail.
+
+## How it differs
+
+This mod is intentionally minimal: it just draws a trail — no particles,
+physics, or extra effects. It offers two styles:
+
+- **Simple line** — a line that follows the cursor, with customizable width,
+  color, and opacity.
+- **Cursor ghost** — faded copies of the real cursor image, left behind where
+  they spawned; directly inspired by the classic Windows cursor-trail feature.
+
+By contrast, [Mouse Trail](https://windhawk.net/mods/mouse-trail) follows the
+cursor with special effects from a full D3D11 particle/physics engine, while
+[Cursor Motion Blur](https://windhawk.net/mods/cursor-motion-blur) only smears
+the cursor at high speed.
 
 ## Features
 
@@ -357,15 +370,9 @@ Fine-tune the trail origin horizontally in pixels (auto-centered by default, 0 =
 `15 15`  
 ![tail_offset.y = +10](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/tail_offset.15.15.gif)
 
-## Above the taskbar and Start menu
-
-On Windows 11 the trail is drawn under the taskbar and Start menu. Install
-the companion **Cursor trail helper - always on top** mod to lift it above
-both (it needs a one-time Win-key press).
-
 ## Architecture
 
-The main mod is a single translation unit (`CursorTrail.cpp`); the optional always-on-top helper (see [Above the taskbar](#above-the-taskbar-and-start-menu)) is a separate mod in `CursorTrailHelperAlwaysOnTop.cpp`. This section describes the main mod. All state is file-scope, grouped into five struct instances:
+The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scope, grouped into five struct instances:
 
 | Instance | Type | Purpose |
 |---|---|---|
@@ -425,6 +432,12 @@ The main mod is a single translation unit (`CursorTrail.cpp`); the optional alwa
 This project is licensed under the MIT License. You're free to use, modify, and
 redistribute the code as long as you keep the original copyright notice and
 credit the author (Ulrizza). See [LICENSE](LICENSE) for the full text.
+
+Part of this mod is adapted from
+[Cursor Motion Blur](https://windhawk.net/mods/cursor-motion-blur) by
+[TheatriChris](https://github.com/chrisc44890), Copyright (c) TheatriChris
+(MIT): the overlay-window scaffolding, the fullscreen-game detection, and
+parts of the render loop.
 
 */
 // ==/WindhawkModReadme==
@@ -3191,9 +3204,8 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &render.pD2DFactory);
 
     HINSTANCE hInstance = GetModuleHandle(NULL);
-    // Keep in sync with kOverlayClass in the companion "Cursor trail helper -
-    // always on top" mod, which finds this window to raise it above the taskbar.
-    const wchar_t CLASS_NAME[] = L"SmearFrameOverlayClass";
+    // Unique overlay window class name (must not collide with other mods).
+    const wchar_t CLASS_NAME[] = L"CursorTrailOverlayClass";
 
     WNDCLASS wc = { };
     wc.lpfnWndProc = OverlayWndProc; 

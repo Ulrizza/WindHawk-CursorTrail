@@ -8,11 +8,11 @@ Line numbers refer to `mods/cursor-trail.wh.cpp` in the fork.
 - [x] 1. Remove `timeBeginPeriod(1)`/`timeEndPeriod(1)` from launcher boilerplate (lines 3240, 3390) — matches wiki snippet verbatim
 - [x] 2. Add idle state — stop multimedia timer + `timeEndPeriod(1)` when idle, longer poll timeout (`20` ms when idle)
 - [x] 3. Fix screen-sized bitmap leak in `EnsureBackbuffer` (lines 2386–2388) — `DeleteDC` before `DeleteObject`
-- [ ] 4a. Resolve companion-mod references in README (submit helper separately, or remove references)
-- [ ] 4b. Rename window class `SmearFrameOverlayClass` → unique name (e.g. from `WH_MOD_ID`)
-- [ ] 5a. Credit Cursor Motion Blur / TheatriChris (MIT license notice)
-- [ ] 5b. Add README sentence explaining difference vs Mouse Trail + Cursor Motion Blur
-- [ ] 5c. Consider a more distinctive mod name
+- [x] 4a. Resolve companion-mod references in README (submit helper separately, or remove references)
+- [x] 4b. Rename window class `SmearFrameOverlayClass` → unique name (e.g. from `WH_MOD_ID`)
+- [x] 5a. Credit Cursor Motion Blur / TheatriChris (MIT license notice)
+- [x] 5b. Add README sentence explaining difference vs Mouse Trail + Cursor Motion Blur
+- [x] 5c. Consider a more distinctive mod name
 
 ## Optional improvements (decide per item)
 

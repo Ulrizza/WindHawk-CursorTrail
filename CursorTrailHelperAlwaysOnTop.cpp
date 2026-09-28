@@ -29,7 +29,7 @@ overlay into `ZBID_SYSTEM_TOOLS` (16), the same band Task Manager uses for
 This mod is injected into `explorer.exe` (which has the privileges required for
 band manipulation) and:
 
-1. Finds the overlay window by its class name (`SmearFrameOverlayClass`).
+1. Finds the overlay window by its class name (`CursorTrailOverlayClass`).
 2. Calls the undocumented `SetWindowBand(hwnd, NULL, 16)`.
 3. If that is denied, it hooks `NtUserEnableIAMAccess` to capture the IAM access
    key the shell uses, then retries with that key. Capturing the key requires
@@ -72,7 +72,7 @@ static NtUserEnableIAMAccess_t pNtUserEnableIAMAccessOriginal;
 
 // --- State ----------------------------------------------------------------
 // Must match the overlay window class created by the main Cursor trail mod.
-static const wchar_t* kOverlayClass = L"SmearFrameOverlayClass";
+static const wchar_t* kOverlayClass = L"CursorTrailOverlayClass";
 static const DWORD kTargetBand = ZBID_SYSTEM_TOOLS;
 
 static std::atomic<ULONG64> g_iamKey{0};
