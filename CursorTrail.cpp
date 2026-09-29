@@ -769,6 +769,11 @@ struct Runtime {
     std::atomic<bool> trailEnabled{true};     // toggled by the enable/disable hotkey; read by both threads
     std::atomic<bool> overlayIdle{false};     // render timer stopped (set by overlay, read by poll)
     std::atomic<bool> idleWakePending{false}; // coalesces poll -> overlay kMsgIdleWake posts
+    // Bumped by the poll thread whenever the trail content changes (sample
+    // pushed/evicted, cursor image changed). The render thread only redraws
+    // when this differs from renderedRevision, so a static trail doesn't keep
+    // repainting an identical frame. Read/written under historyMutex.
+    std::atomic<unsigned long long> contentRevision{0};
     int     sampleRate = 1;                   // polling interval in ms
     MMRESULT mmTimerId = 0;
     DWORD   lastActiveTime = 0;               // overlay-thread-only; last frame with work
@@ -778,10 +783,15 @@ struct Runtime {
     POINT lastCursorPos = { 0, 0 };           // previous raw cursor position (movement tracking)
     bool  lastCursorValid = false;
     bool  isFading = false;
+    HCURSOR lastSampledCursor = NULL;         // poll-thread-owned; last cursor image sampled
+    POINT lastSamplePos = { 0, 0 };           // poll-thread-owned; last pushed sample (canvas coords)
+    bool  lastSampleValid = false;            // poll-thread-owned; whether lastSamplePos is set
 
     RECT  prevDirtyRect = { 0, 0, 0, 0 };     // render-thread-only frame state
     bool  hasPrevDirty = false;
     bool  needsClear = false;
+    unsigned long long renderedRevision = 0;  // render-thread-only; last content revision drawn
+    unsigned renderedSettingsVersion = 0;     // render-thread-only; last settings version drawn
     DWORD lastFullscreenCheck = 0;
 };
 
@@ -2174,14 +2184,35 @@ static void GrowBBox(RECT& bbox, bool& hasBBox, LONG l, LONG t, LONG r, LONG b) 
     }
 }
 
+// Forward declaration: defined with the idle handling below.
+static void RequestOverlayWake();
+
+// Records that the trail content changed since the last rendered frame: bumps
+// the revision so the render thread redraws, and, if the overlay has gone idle,
+// wakes it. Call with runtime.historyMutex held (the poll thread mutates the
+// history under that lock); the render thread re-checks the revision under the
+// same lock before idling, so a change can never be stranded.
+static void MarkContentChanged() {
+    runtime.contentRevision.fetch_add(1, std::memory_order_relaxed);
+    if (runtime.overlayIdle.load()) {
+        RequestOverlayWake();
+    }
+}
+
 // Time-based eviction: drop samples older than settings.tailDuration, then cap the
 // total count. Caller must hold runtime.historyMutex.
 static void EvictByTime(DWORD now) {
-    while (!runtime.history.empty() && (now - runtime.history.back().t) > (DWORD)settings.tailDuration)
+    bool changed = false;
+    while (!runtime.history.empty() && (now - runtime.history.back().t) > (DWORD)settings.tailDuration) {
         runtime.history.pop_back();
+        changed = true;
+    }
     const size_t kMaxSamples = (size_t)(settings.tailDuration);
-    while (runtime.history.size() > kMaxSamples)
+    while (runtime.history.size() > kMaxSamples) {
         runtime.history.pop_back();
+        changed = true;
+    }
+    if (changed) MarkContentChanged();
 }
 
 // Forward declaration: MMTimerCallback is defined later, before OverlayThreadProc.
@@ -2208,10 +2239,14 @@ static void ResumeRenderTimer() {
     }
 }
 
-// Called by the overlay thread after a frame that had nothing to draw. If the
-// overlay has been inactive for kIdleGraceMs and the history is empty, stops the
+// Called by the overlay thread after a frame. idleAllowed is false when the
+// frame just drew something (so there is no point idling). If the overlay has
+// been inactive for kIdleGraceMs and no content change is pending, stops the
 // render timer and releases the timer resolution. Overlay-thread-only.
-static void EnterIdleIfInactive(DWORD now) {
+static void EnterIdleIfInactive(DWORD now, bool idleAllowed) {
+    if (!idleAllowed) {
+        return;
+    }
     if (runtime.overlayIdle.load()) {
         return;
     }
@@ -2221,12 +2256,16 @@ static void EnterIdleIfInactive(DWORD now) {
 
     {
         std::lock_guard<std::mutex> lock(runtime.historyMutex);
-        if (!runtime.history.empty()) {
+        // A content change may have arrived since the frame was rendered (the
+        // poll thread bumps the revision and wakes under this same lock); stay
+        // awake so that change gets drawn instead of being stranded.
+        if (runtime.contentRevision.load(std::memory_order_relaxed) !=
+            runtime.renderedRevision) {
             return;
         }
-        // Set the flag while holding the lock: the poll thread pushes samples
-        // under the same lock and re-checks the flag, so a sample pushed right
-        // now is guaranteed to wake us again instead of being stranded.
+        // Set the flag while holding the lock: the poll thread bumps the
+        // revision under the same lock and re-checks the flag, so a change
+        // arriving right now is guaranteed to wake us again.
         runtime.overlayIdle.store(true);
     }
 
@@ -2269,8 +2308,12 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             break;
         }
         // Respect the game-running flag set by SmearTimerProc, and the
-        // enable/disable hotkey state.
-        if (runtime.isGameRunning.load() || !runtime.trailEnabled.load()) continue;
+        // enable/disable hotkey state. Drop the sample anchor so a fresh one is
+        // pushed when sampling resumes.
+        if (runtime.isGameRunning.load() || !runtime.trailEnabled.load()) {
+            runtime.lastSampleValid = false;
+            continue;
+        }
 
         POINT pt;
         if (!GetCursorPos(&pt)) continue;
@@ -2302,13 +2345,19 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             if (runtime.lastCursorValid &&
                 (pt.x != runtime.lastCursorPos.x || pt.y != runtime.lastCursorPos.y)) {
                 runtime.lastMovementTime = now;
-                // If the overlay released its render timer, wake it back up.
-                if (runtime.overlayIdle.load()) {
-                    RequestOverlayWake();
-                }
             }
             runtime.lastCursorPos = pt;
             runtime.lastCursorValid = true;
+
+            // For the line style, a cursor image change (e.g. arrow -> I-beam)
+            // must redraw even while the cursor is stationary so the trail head
+            // picks up the new image's visual center. Ghost copies keep their
+            // own latched image, so it only matters when a new copy spawns.
+            if (!settings.isGhost && sampleCursor && runtime.lastSampledCursor &&
+                sampleCursor != runtime.lastSampledCursor) {
+                MarkContentChanged();
+            }
+            runtime.lastSampledCursor = sampleCursor;
 
             if (settings.sizeBased) {
                 if ((settings.sizeTimeout > 0 && runtime.lastMovementTime > 0 &&
@@ -2333,8 +2382,11 @@ DWORD WINAPI PollThreadProc(LPVOID) {
                         // history to settings.tailSize copies; the oldest drops as
                         // new copies are stamped. When the cursor stops, no new
                         // copies are pushed, so the existing ones stay put.
-                        while (runtime.history.size() > (size_t)settings.tailSize)
-                            runtime.history.pop_back();
+                        if (runtime.history.size() > (size_t)settings.tailSize) {
+                            while (runtime.history.size() > (size_t)settings.tailSize)
+                                runtime.history.pop_back();
+                            MarkContentChanged();
+                        }
                     } else {
                         // Distance-based eviction: walk from head (newest)
                         // backwards, accumulating pixel distance. Pop
@@ -2349,6 +2401,7 @@ DWORD WINAPI PollThreadProc(LPVOID) {
                             if (cumulative > settings.tailSize) {
                                 while (runtime.history.size() > i)
                                     runtime.history.pop_back();
+                                MarkContentChanged();
                                 break;
                             }
                         }
@@ -2364,6 +2417,7 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             // new samples are pushed until the cursor is shown again.
             if (runtime.cursorHidden.load()) {
                 origin.lastCursorValid = false;
+                runtime.lastSampleValid = false;
                 continue;
             }
 
@@ -2447,18 +2501,22 @@ DWORD WINAPI PollThreadProc(LPVOID) {
 
             // === SPAWN / DUPLICATE-SKIP — only blocks push, not eviction ===
             // Eviction has already run above, so it is safe to continue here.
-            if (!runtime.history.empty()) {
+            // Compare against the last pushed sample (not history.front()) so a
+            // stationary cursor doesn't push a fresh sample every time the
+            // history drains; that would keep the trail non-empty forever and
+            // stop the overlay from ever going idle.
+            if (runtime.lastSampleValid) {
                 if (settings.isGhost) {
                     // Ghost copies are latched at their spawn position, so only
                     // stamp a new copy once the cursor has travelled far enough
                     // from the last one. This keeps existing copies fixed in
                     // place instead of sliding with the cursor.
-                    float dx = (float)(newPt.x - runtime.history.front().pos.x);
-                    float dy = (float)(newPt.y - runtime.history.front().pos.y);
+                    float dx = (float)(newPt.x - runtime.lastSamplePos.x);
+                    float dy = (float)(newPt.y - runtime.lastSamplePos.y);
                     if (dx * dx + dy * dy < settings.ghostSpawnDist * settings.ghostSpawnDist)
                         continue;
-                } else if (runtime.history.front().pos.x == newPt.x &&
-                           runtime.history.front().pos.y == newPt.y) {
+                } else if (runtime.lastSamplePos.x == newPt.x &&
+                           runtime.lastSamplePos.y == newPt.y) {
                     // Cursor hasn't moved since last sample — skip push.
                     continue;
                 }
@@ -2470,8 +2528,11 @@ DWORD WINAPI PollThreadProc(LPVOID) {
             s.t = now;
             s.cursor = sampleCursor;
             runtime.history.push_front(s);
+            runtime.lastSamplePos = newPt;
+            runtime.lastSampleValid = true;
             runtime.lastMovementTime = now;
             runtime.isFading = false;
+            MarkContentChanged();
         }
     }
     return 0;
@@ -2693,10 +2754,12 @@ static void RenderTrail(const std::vector<D2D1_POINT_2F>& smoothed,
         }
         // Future styles: add else-if branches here, e.g.
         // else if (settings.activeStyle == L"glow") { RenderGlowStyle(smoothed); }
-        runtime.needsClear = true;
-    } else {
-        runtime.needsClear = false;
     }
+    // A trail frame replaces the previous one and the dirty-rect blit erases
+    // any leftovers, so no separate clear pass is queued. needsClear is only
+    // raised by the transient overlays (toggle effect / tail preview) that end
+    // without drawing, to force one erasing frame.
+    runtime.needsClear = false;
 }
 
 // Draws the debug outline boxes and trail-start marker (when enabled).
@@ -3033,6 +3096,16 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
             runtime.history.clear();
             nothingToDraw = wasEmpty && !runtime.needsClear &&
                             !effectActive && !previewActive;
+            if (nothingToDraw) {
+                // Nothing is staged for drawing after the wipe; mark the current
+                // content as rendered so EnterIdleIfInactive may stop the timer.
+                runtime.renderedRevision =
+                    runtime.contentRevision.load(std::memory_order_relaxed);
+            } else {
+                // Something was on screen (or an effect/preview is pending);
+                // force a frame so it gets erased instead of being skipped.
+                MarkContentChanged();
+            }
         }
         if (nothingToDraw) {
             // Nothing to draw. If the trail is suppressed because the user
@@ -3040,7 +3113,7 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
             // go idle; the hotkey wakes it again. While a game is running we
             // keep the timer alive so we notice when it exits.
             if (!gameRunning) {
-                EnterIdleIfInactive(dwTime);
+                EnterIdleIfInactive(dwTime, true);
             }
             return;
         }
@@ -3051,15 +3124,33 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
         UpdateCursorCenterOffset();
     }
 
-    // Snapshot the current history size to decide whether to draw.
-    bool historyEmpty;
+    // Snapshot the content revision (and the sample count) to decide whether
+    // this frame would differ from the last one. Frames that would be
+    // pixel-identical are skipped so a static trail doesn't keep repainting the
+    // whole backbuffer at 125 Hz.
+    unsigned long long rev;
+    size_t historyCount;
     {
         std::lock_guard<std::mutex> lock(runtime.historyMutex);
-        historyEmpty = runtime.history.empty();
+        rev = runtime.contentRevision.load(std::memory_order_relaxed);
+        historyCount = runtime.history.size();
     }
+    bool contentChanged = (rev != runtime.renderedRevision);
+    unsigned settingsVersion = g_settingsVersion.load(std::memory_order_relaxed);
+    bool settingsChanged = (settingsVersion != runtime.renderedSettingsVersion);
+    // Cursor-ghost time-based copies fade by age, so their look changes every
+    // frame even with an unchanged history. Every other combination only
+    // changes when the history does (index-based ratios, eviction-driven fades).
+    // A single sample draws nothing, so it doesn't count.
+    bool timeDependent = settings.isGhost && !settings.sizeBased &&
+                         historyCount >= 2;
+    bool debugActive = settings.debugShowOutline && cursor.bmWidth > 0 &&
+                       cursor.bmHeight > 0;
+    bool wantDraw = contentChanged || settingsChanged || timeDependent ||
+                    runtime.needsClear || effectActive || previewActive ||
+                    debugActive;
 
-    if (!historyEmpty || runtime.needsClear || effectActive || previewActive ||
-        (settings.debugShowOutline && cursor.bmWidth > 0 && cursor.bmHeight > 0)) {
+    if (wantDraw) {
         // Something is being drawn this frame; keep the overlay awake.
         runtime.lastActiveTime = dwTime;
         HDC hdcScreen = GetDC(NULL);
@@ -3122,13 +3213,19 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
         }
 
         BlitOverlay(hwnd, hdcScreen, vX, vY, vW, vH, curBBox, hasCurBBox);
+
+        // Mark the revisions we actually drew. Any change that arrived while
+        // this frame was being built leaves contentRevision/settingsVersion
+        // ahead, so the next tick redraws.
+        runtime.renderedRevision = rev;
+        runtime.renderedSettingsVersion = settingsVersion;
     }
 
-    // Nothing was drawn this frame and nothing has been drawn for a while:
-    // release the render timer. Skipped while a game is running so game-exit
+    // If nothing changed this frame, release the render timer once the grace
+    // period has elapsed. Skipped while a game is running so game-exit
     // detection keeps working.
     if (!gameRunning) {
-        EnterIdleIfInactive(dwTime);
+        EnterIdleIfInactive(dwTime, !wantDraw);
     }
 }
 
