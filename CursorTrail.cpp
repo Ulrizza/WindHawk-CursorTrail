@@ -3024,20 +3024,25 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
         if (effectActive || previewActive) {
             UpdateCursorCenterOffset();
         }
+        // Decide whether there is anything to draw while holding the lock, but
+        // release it before EnterIdleIfInactive (which takes the lock itself).
+        bool nothingToDraw;
         {
             std::lock_guard<std::mutex> lock(runtime.historyMutex);
             bool wasEmpty = runtime.history.empty();
             runtime.history.clear();
-            if (wasEmpty && !runtime.needsClear && !effectActive && !previewActive) {
-                // Nothing to draw. If the trail is suppressed because the user
-                // turned it off (not because a game is running), let the overlay
-                // go idle; the hotkey wakes it again. While a game is running we
-                // keep the timer alive so we notice when it exits.
-                if (!gameRunning) {
-                    EnterIdleIfInactive(dwTime);
-                }
-                return;
+            nothingToDraw = wasEmpty && !runtime.needsClear &&
+                            !effectActive && !previewActive;
+        }
+        if (nothingToDraw) {
+            // Nothing to draw. If the trail is suppressed because the user
+            // turned it off (not because a game is running), let the overlay
+            // go idle; the hotkey wakes it again. While a game is running we
+            // keep the timer alive so we notice when it exits.
+            if (!gameRunning) {
+                EnterIdleIfInactive(dwTime);
             }
+            return;
         }
     } else {
         // Trail active — update cursor appearance caches. The poll thread
