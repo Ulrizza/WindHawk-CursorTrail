@@ -363,7 +363,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 | Instance | Type | Purpose |
 |---|---|---|
 | `settings` | `Settings` | Parsed settings (tail geometry, style, width/color/opacity, trail offset). Written by `LoadSettings()` on the overlay thread (under `runtime.historyMutex`), read by the render and poll threads. |
-| `cursor` | `CursorState` | Cursor geometry cache: `centerOffset`/`visualOffset` (mutex-protected) plus render-thread-only debug dims and the per-`HCURSOR` `geomCache`. |
+| `cursor` | `CursorState` | Cursor geometry cache: `visualOffset` (mutex-protected) plus render-thread-only cursor dims (`bmWidth`/`bmHeight`/DPI scale) and the per-`HCURSOR` `geomCache`. |
 | `origin` | `OriginTransition` | Poll-thread-owned ease-in-out state for the trail-origin glide on cursor-image change. |
 | `render` | `RenderResources` | Direct2D factory/target/brushes, stroke style, the cached backbuffer, and the per-`HCURSOR` `cursorBitmapCache` (tinted bitmap variants) used by the ghost style. Render-thread-only. |
 | `runtime` | `Runtime` | Overlay window/threads, the `history` deque, atomics, multimedia timer, and per-frame render state. |
@@ -377,10 +377,10 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 ### Locking model
 
 - `runtime.historyMutex` protects `runtime.history` (poll + render threads) and serializes `LoadSettings()` (run on the overlay thread) against the poll thread's settings reads.
-- `cursor.offsetMutex` protects `cursor.centerOffset` / `cursor.visualOffset` (written by render thread, read by poll thread).
+- `cursor.offsetMutex` protects `cursor.visualOffset` (written by render thread, read by poll thread).
 - Lock order is always `runtime.historyMutex` → `cursor.offsetMutex`.
 - `runtime.isGameRunning`, `runtime.cursorHidden`, `runtime.renderScheduled`, and `runtime.trailEnabled` are atomics.
-- `origin.*`, `render.*`, and the cursor debug dimensions are single-thread owned (see table above).
+- `origin.*`, `render.*`, and the cursor dimensions are single-thread owned (see table above).
 
 ### Render pipeline
 
@@ -392,9 +392,8 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 4. `ComputeTrailBBox` — trail bounding box plus stroke-width (line) or cursor-size (ghost) margin.
 5. `RenderTrail` — dispatch to the active style renderer (`RenderSimpleLineStyle` or `RenderCursorGhostStyle`); both paint tail → head so the newest part stays on top at self-crossings.
 6. `RenderToggleEffect` — optional enable/disable hotkey circle (2px outline, centered on the trail head, follows the cursor).
-7. `DrawDebug` — optional white/red outline boxes plus a green trail-start marker.
-8. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
-9. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
+7. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
+8. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
 
 ### Settings & blending
 
@@ -403,7 +402,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 
 ### Cursor geometry
 
-`UpdateCursorCenterOffset` caches, per `HCURSOR`: the bitmap-center offset (for the debug boxes), the visible-pixel-center offset (the line-style trail origin), the hotspot, the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt only when the cursor handle changes. `ComputeCursorGeom` holds the shared computation; `GetCursorGeom` lazily computes geometry for any cursor handle still referenced by the trail (so the ghost style can draw older images after an image change). Ghost samples store the raw cursor hotspot, and the ghost renderer anchors each copy by its own image's hotspot, so a copy lands exactly where that cursor image was — independent of the render thread's offset refresh. The ghost style also builds and caches D2D bitmaps per `HCURSOR` via `EnsureCursorBitmap`, rendering the cursor with `DrawIconEx` at the on-screen pixel size (color + mask + anti-aliased alpha) so copies are blitted 1:1 without resampling. The `ghostOptions.color` gradient (when set) is baked into the cached pixels by sampling it at `kGhostTintSteps` ratios (one bitmap per sample; an empty color list yields a single untinted variant), and `GetCursorBitmap(hCursor, ratio)` selects the nearest variant for each copy. `color.replace.mode` picks the pixels to recolor: `whole` swaps every non-transparent pixel; `auto` splits each pixel between two reference colors — the replace color (the cursor's enclosed center color from `AnalyzeCursorColors`, falling back to the largest region when nothing is enclosed) and a keep color (the largest boundary/outline region) — swapping pixels closer to the replace color with a small softness band around the midpoint; `custom` replaces pixels whose color matches `color.replace.custom` (soft falloff so anti-aliased edges blend), leaving every other color untouched. Both caches are released with the render target.
+`UpdateCursorCenterOffset` caches, per `HCURSOR`: the visible-pixel-center offset (the line-style trail origin), the hotspot, the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt only when the cursor handle changes. `ComputeCursorGeom` holds the shared computation; `GetCursorGeom` lazily computes geometry for any cursor handle still referenced by the trail (so the ghost style can draw older images after an image change). Ghost samples store the raw cursor hotspot, and the ghost renderer anchors each copy by its own image's hotspot, so a copy lands exactly where that cursor image was — independent of the render thread's offset refresh. The ghost style also builds and caches D2D bitmaps per `HCURSOR` via `EnsureCursorBitmap`, rendering the cursor with `DrawIconEx` at the on-screen pixel size (color + mask + anti-aliased alpha) so copies are blitted 1:1 without resampling. The `ghostOptions.color` gradient (when set) is baked into the cached pixels by sampling it at `kGhostTintSteps` ratios (one bitmap per sample; an empty color list yields a single untinted variant), and `GetCursorBitmap(hCursor, ratio)` selects the nearest variant for each copy. `color.replace.mode` picks the pixels to recolor: `whole` swaps every non-transparent pixel; `auto` splits each pixel between two reference colors — the replace color (the cursor's enclosed center color from `AnalyzeCursorColors`, falling back to the largest region when nothing is enclosed) and a keep color (the largest boundary/outline region) — swapping pixels closer to the replace color with a small softness band around the midpoint; `custom` replaces pixels whose color matches `color.replace.custom` (soft falloff so anti-aliased edges blend), leaving every other color untouched. Both caches are released with the render target.
 
 ### Lifecycle
 

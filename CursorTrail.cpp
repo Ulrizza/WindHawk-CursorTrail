@@ -377,7 +377,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 | Instance | Type | Purpose |
 |---|---|---|
 | `settings` | `Settings` | Parsed settings (tail geometry, style, width/color/opacity, trail offset). Written by `LoadSettings()` on the overlay thread (under `runtime.historyMutex`), read by the render and poll threads. |
-| `cursor` | `CursorState` | Cursor geometry cache: `centerOffset`/`visualOffset` (mutex-protected) plus render-thread-only debug dims and the per-`HCURSOR` `geomCache`. |
+| `cursor` | `CursorState` | Cursor geometry cache: `visualOffset` (mutex-protected) plus render-thread-only cursor dims (`bmWidth`/`bmHeight`/DPI scale) and the per-`HCURSOR` `geomCache`. |
 | `origin` | `OriginTransition` | Poll-thread-owned ease-in-out state for the trail-origin glide on cursor-image change. |
 | `render` | `RenderResources` | Direct2D factory/target/brushes, stroke style, the cached backbuffer, and the per-`HCURSOR` `cursorBitmapCache` (tinted bitmap variants) used by the ghost style. Render-thread-only. |
 | `runtime` | `Runtime` | Overlay window/threads, the `history` deque, atomics, multimedia timer, and per-frame render state. |
@@ -391,10 +391,10 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 ### Locking model
 
 - `runtime.historyMutex` protects `runtime.history` (poll + render threads) and serializes `LoadSettings()` (run on the overlay thread) against the poll thread's settings reads.
-- `cursor.offsetMutex` protects `cursor.centerOffset` / `cursor.visualOffset` (written by render thread, read by poll thread).
+- `cursor.offsetMutex` protects `cursor.visualOffset` (written by render thread, read by poll thread).
 - Lock order is always `runtime.historyMutex` → `cursor.offsetMutex`.
 - `runtime.isGameRunning`, `runtime.cursorHidden`, `runtime.renderScheduled`, and `runtime.trailEnabled` are atomics.
-- `origin.*`, `render.*`, and the cursor debug dimensions are single-thread owned (see table above).
+- `origin.*`, `render.*`, and the cursor dimensions are single-thread owned (see table above).
 
 ### Render pipeline
 
@@ -406,9 +406,8 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 4. `ComputeTrailBBox` — trail bounding box plus stroke-width (line) or cursor-size (ghost) margin.
 5. `RenderTrail` — dispatch to the active style renderer (`RenderSimpleLineStyle` or `RenderCursorGhostStyle`); both paint tail → head so the newest part stays on top at self-crossings.
 6. `RenderToggleEffect` — optional enable/disable hotkey circle (2px outline, centered on the trail head, follows the cursor).
-7. `DrawDebug` — optional white/red outline boxes plus a green trail-start marker.
-8. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
-9. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
+7. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
+8. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
 
 ### Settings & blending
 
@@ -417,7 +416,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 
 ### Cursor geometry
 
-`UpdateCursorCenterOffset` caches, per `HCURSOR`: the bitmap-center offset (for the debug boxes), the visible-pixel-center offset (the line-style trail origin), the hotspot, the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt only when the cursor handle changes. `ComputeCursorGeom` holds the shared computation; `GetCursorGeom` lazily computes geometry for any cursor handle still referenced by the trail (so the ghost style can draw older images after an image change). Ghost samples store the raw cursor hotspot, and the ghost renderer anchors each copy by its own image's hotspot, so a copy lands exactly where that cursor image was — independent of the render thread's offset refresh. The ghost style also builds and caches D2D bitmaps per `HCURSOR` via `EnsureCursorBitmap`, rendering the cursor with `DrawIconEx` at the on-screen pixel size (color + mask + anti-aliased alpha) so copies are blitted 1:1 without resampling. The `ghostOptions.color` gradient (when set) is baked into the cached pixels by sampling it at `kGhostTintSteps` ratios (one bitmap per sample; an empty color list yields a single untinted variant), and `GetCursorBitmap(hCursor, ratio)` selects the nearest variant for each copy. `color.replace.mode` picks the pixels to recolor: `whole` swaps every non-transparent pixel; `auto` splits each pixel between two reference colors — the replace color (the cursor's enclosed center color from `AnalyzeCursorColors`, falling back to the largest region when nothing is enclosed) and a keep color (the largest boundary/outline region) — swapping pixels closer to the replace color with a small softness band around the midpoint; `custom` replaces pixels whose color matches `color.replace.custom` (soft falloff so anti-aliased edges blend), leaving every other color untouched. Both caches are released with the render target.
+`UpdateCursorCenterOffset` caches, per `HCURSOR`: the visible-pixel-center offset (the line-style trail origin), the hotspot, the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt only when the cursor handle changes. `ComputeCursorGeom` holds the shared computation; `GetCursorGeom` lazily computes geometry for any cursor handle still referenced by the trail (so the ghost style can draw older images after an image change). Ghost samples store the raw cursor hotspot, and the ghost renderer anchors each copy by its own image's hotspot, so a copy lands exactly where that cursor image was — independent of the render thread's offset refresh. The ghost style also builds and caches D2D bitmaps per `HCURSOR` via `EnsureCursorBitmap`, rendering the cursor with `DrawIconEx` at the on-screen pixel size (color + mask + anti-aliased alpha) so copies are blitted 1:1 without resampling. The `ghostOptions.color` gradient (when set) is baked into the cached pixels by sampling it at `kGhostTintSteps` ratios (one bitmap per sample; an empty color list yields a single untinted variant), and `GetCursorBitmap(hCursor, ratio)` selects the nearest variant for each copy. `color.replace.mode` picks the pixels to recolor: `whole` swaps every non-transparent pixel; `auto` splits each pixel between two reference colors — the replace color (the cursor's enclosed center color from `AnalyzeCursorColors`, falling back to the largest region when nothing is enclosed) and a keep color (the largest boundary/outline region) — swapping pixels closer to the replace color with a small softness band around the midpoint; `custom` replaces pixels whose color matches `color.replace.custom` (soft falloff so anti-aliased edges blend), leaving every other color untouched. Both caches are released with the render target.
 
 ### Lifecycle
 
@@ -649,8 +648,6 @@ struct Settings {
     int   tailSize = 2000;
     DWORD sizeTimeout = 0;
     bool  antialiasing = true;
-    bool  debugShowOutline = false;                    // test-only; hidden from the settings UI
-    bool  debugShowTailPreview = false;                // test-only; hidden from the settings UI
     bool  isGhost = false;                            // active style is cursor_ghost
     int   ghostSpacing = 0;                           // extra px between ghost copies
     float ghostSpawnDist = 2.0f;                      // px cursor must travel before a new ghost is stamped
@@ -679,26 +676,21 @@ struct CursorGeom {
     int   bmWidth = 0, bmHeight = 0;
     float dpiScaleX = 1.0f, dpiScaleY = 1.0f;
     int   hotspotX = 0, hotspotY = 0;  // hotspot in native bitmap pixels
-    POINT centerOffset = { 0, 0 };   // hotspot → bitmap center (scaled)
     POINT visualOffset = { 0, 0 };   // hotspot → visible-pixel center (scaled)
     float visCenterX = 0.0f, visCenterY = 0.0f;  // visible center in bitmap pixels
     bool  visibleValid = false;
     int   visLeft = 0, visTop = 0, visRight = 0, visBottom = 0;
 };
 
-// Cursor geometry cache. The center/visual offsets are shared with the poll
-// thread via offsetMutex; the debug dimensions and geomCache below are
-// render-thread-only.
+// Cursor geometry cache. The visual offset is shared with the poll thread via
+// offsetMutex; the cursor dimensions and geomCache below are render-thread-only.
 struct CursorState {
     HCURSOR cachedCursor = NULL;
-    POINT   centerOffset = { 0, 0 };  // hotspot → bitmap center (anchors debug boxes)
     POINT   visualOffset = { 0, 0 };  // hotspot → visible-pixel center (trail origin)
-    std::mutex offsetMutex;                 // protects center/visual offsets (read by poll thread)
+    std::mutex offsetMutex;                 // protects visualOffset (read by poll thread)
 
-    int   bmWidth = 0, bmHeight = 0;        // bitmap dims + DPI scale for the debug boxes
+    int   bmWidth = 0, bmHeight = 0;        // bitmap dims + DPI scale (toggle effect + ghost bitmaps)
     float dpiScaleX = 1.0f, dpiScaleY = 1.0f;
-    bool  visibleValid = false;             // visible (alpha-trimmed) bounds
-    int   visLeft = 0, visTop = 0, visRight = 0, visBottom = 0;
 
     std::unordered_map<HCURSOR, CursorGeom> geomCache;  // render-thread-only per-cursor geometry
 };
@@ -740,10 +732,6 @@ struct RenderResources {
     ID2D1SolidColorBrush* pSimpleLineBrush = nullptr;
     ID2D1SolidColorBrush* pEffectBrush = nullptr;   // enable/disable toggle circle
     ID2D1StrokeStyle*     pStrokeStyle = nullptr;
-    // DEBUG brushes (temporary): white = bitmap bounds, red = visible pixels, green = trail start.
-    ID2D1SolidColorBrush* pDebugBrush = nullptr;
-    ID2D1SolidColorBrush* pDebugBrushRed = nullptr;
-    ID2D1SolidColorBrush* pDebugBrushGreen = nullptr;
 
     // Cursor ghost style: per-HCURSOR D2D bitmaps, built lazily when a new
     // cursor image appears and released with the render target.
@@ -1150,12 +1138,6 @@ void LoadSettings() {
     settings.tailOffsetX = Wh_GetIntSetting(L"tail_offset.x");
     settings.tailOffsetY = Wh_GetIntSetting(L"tail_offset.y");
 
-    // Test-only debug features, hidden from the settings UI (the `debug` group
-    // was removed from the ==WindhawkModSettings== metadata). Flip these to
-    // true to exercise the debug outline / tail preview during development.
-    settings.debugShowOutline = false;
-    settings.debugShowTailPreview = false;
-
     settings.activeStyle = ReadStringSetting(L"style", L"simple_line");
 
     // RG-3: unknown style value → fallback to simple_line
@@ -1389,10 +1371,6 @@ static bool ComputeCursorGeom(HCURSOR hCursor, CursorGeom& g) {
         g.hotspotX = (int)ii.xHotspot;
         g.hotspotY = (int)ii.yHotspot;
 
-        // Bitmap center (anchors the debug outline boxes).
-        g.centerOffset.x = (int)(((bmWidth / 2.0f) - (int)ii.xHotspot) * sx + 0.5f);
-        g.centerOffset.y = (int)(((bmHeight / 2.0f) - (int)ii.yHotspot) * sy + 0.5f);
-
         // Visible-pixel center (trail origin). Falls back to the bitmap center.
         ComputeVisibleBounds(hbmToUse, g.visLeft, g.visTop,
                              g.visRight, g.visBottom, g.visibleValid);
@@ -1414,18 +1392,16 @@ static bool ComputeCursorGeom(HCURSOR hCursor, CursorGeom& g) {
 }
 
 // Update the cached geometry for the current cursor. The current cursor's
-// geometry is also published in the scalar cursor.* fields for the poll thread
-// (trail origin) and the debug overlay; the full per-cursor geometry lives in
-// cursor.geomCache so the ghost style can place older cursor images too.
+// visual offset is also published in the scalar cursor.* fields for the poll
+// thread (trail origin); the full per-cursor geometry lives in cursor.geomCache
+// so the ghost style can place older cursor images too.
 void UpdateCursorCenterOffset() {
     std::lock_guard<std::mutex> lock(cursor.offsetMutex);
 
     CURSORINFO ci = { sizeof(CURSORINFO) };
     if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
         runtime.cursorHidden.store(true);
-        cursor.centerOffset = { 0, 0 };
         cursor.visualOffset = { 0, 0 };
-        cursor.visibleValid = false;
         cursor.bmWidth = 0;
         cursor.bmHeight = 0;
         cursor.cachedCursor = NULL;
@@ -1439,9 +1415,7 @@ void UpdateCursorCenterOffset() {
 
     CursorGeom g;
     if (!ComputeCursorGeom(ci.hCursor, g)) {
-        cursor.centerOffset = { 0, 0 };
         cursor.visualOffset = { 0, 0 };
-        cursor.visibleValid = false;
         cursor.bmWidth = 0;
         cursor.bmHeight = 0;
         cursor.cachedCursor = NULL;
@@ -1450,17 +1424,11 @@ void UpdateCursorCenterOffset() {
 
     cursor.geomCache[ci.hCursor] = g;
 
-    cursor.centerOffset = g.centerOffset;
     cursor.visualOffset = g.visualOffset;
     cursor.bmWidth = g.bmWidth;
     cursor.bmHeight = g.bmHeight;
     cursor.dpiScaleX = g.dpiScaleX;
     cursor.dpiScaleY = g.dpiScaleY;
-    cursor.visibleValid = g.visibleValid;
-    cursor.visLeft = g.visLeft;
-    cursor.visTop = g.visTop;
-    cursor.visRight = g.visRight;
-    cursor.visBottom = g.visBottom;
 
     cursor.cachedCursor = ci.hCursor;
 }
@@ -2137,9 +2105,6 @@ void RenderCursorGhostStyle(const std::vector<D2D1_POINT_2F>& smoothed,
 static void ReleaseRenderTargetResources() {
     if (render.pSimpleLineBrush) { render.pSimpleLineBrush->Release(); render.pSimpleLineBrush = nullptr; }
     if (render.pEffectBrush) { render.pEffectBrush->Release(); render.pEffectBrush = nullptr; }
-    if (render.pDebugBrush) { render.pDebugBrush->Release(); render.pDebugBrush = nullptr; }
-    if (render.pDebugBrushRed) { render.pDebugBrushRed->Release(); render.pDebugBrushRed = nullptr; }
-    if (render.pDebugBrushGreen) { render.pDebugBrushGreen->Release(); render.pDebugBrushGreen = nullptr; }
     for (auto& kv : render.cursorBitmapCache) {
         for (auto& v : kv.second.variants) {
             if (v.bitmap) v.bitmap->Release();
@@ -2579,12 +2544,6 @@ static void EnsureRenderTarget() {
         render.pD2DFactory->CreateDCRenderTarget(&props, &render.pDCRenderTarget);
         if (render.pDCRenderTarget) {
             render.pDCRenderTarget->CreateSolidColorBrush(
-                D2D1::ColorF(D2D1::ColorF::White), &render.pDebugBrush);
-            render.pDCRenderTarget->CreateSolidColorBrush(
-                D2D1::ColorF(D2D1::ColorF::Red), &render.pDebugBrushRed);
-            render.pDCRenderTarget->CreateSolidColorBrush(
-                D2D1::ColorF(D2D1::ColorF::Lime), &render.pDebugBrushGreen);
-            render.pDCRenderTarget->CreateSolidColorBrush(
                 D2D1::ColorF(D2D1::ColorF::White), &render.pEffectBrush);
         }
     }
@@ -2758,65 +2717,9 @@ static void RenderTrail(const std::vector<D2D1_POINT_2F>& smoothed,
     }
     // A trail frame replaces the previous one and the dirty-rect blit erases
     // any leftovers, so no separate clear pass is queued. needsClear is only
-    // raised by the transient overlays (toggle effect / tail preview) that end
-    // without drawing, to force one erasing frame.
+    // raised by the transient toggle effect that ends without drawing, to force
+    // one erasing frame.
     runtime.needsClear = false;
-}
-
-// Draws the debug outline boxes and trail-start marker (when enabled).
-static void DrawDebug(const POINT& pt, int vX, int vY,
-                      const std::vector<D2D1_POINT_2F>& smoothed,
-                      RECT& bbox, bool& hasBBox) {
-    // White/red outline boxes around the detected cursor bitmap and its
-    // visible (alpha-trimmed) pixels.
-    if (settings.debugShowOutline && cursor.bmWidth > 0 && cursor.bmHeight > 0) {
-        POINT centerOffset;
-        {
-            std::lock_guard<std::mutex> offsetLock(cursor.offsetMutex);
-            centerOffset = cursor.centerOffset;
-        }
-        float boxW = cursor.bmWidth * cursor.dpiScaleX;
-        float boxH = cursor.bmHeight * cursor.dpiScaleY;
-        float boxCx = (float)(pt.x + centerOffset.x - vX);
-        float boxCy = (float)(pt.y + centerOffset.y - vY);
-        D2D1_RECT_F debugBox = D2D1::RectF(boxCx - boxW / 2.0f,
-                                           boxCy - boxH / 2.0f,
-                                           boxCx + boxW / 2.0f,
-                                           boxCy + boxH / 2.0f);
-        if (render.pDebugBrush) {
-            render.pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-            render.pDCRenderTarget->DrawRectangle(debugBox, render.pDebugBrush, 2.0f);
-        }
-        if (cursor.visibleValid && render.pDebugBrushRed) {
-            float baseX = boxCx - boxW / 2.0f;
-            float baseY = boxCy - boxH / 2.0f;
-            D2D1_RECT_F visBox = D2D1::RectF(
-                baseX + cursor.visLeft * cursor.dpiScaleX,
-                baseY + cursor.visTop * cursor.dpiScaleY,
-                baseX + cursor.visRight * cursor.dpiScaleX,
-                baseY + cursor.visBottom * cursor.dpiScaleY);
-            render.pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-            render.pDCRenderTarget->DrawRectangle(visBox, render.pDebugBrushRed, 2.0f);
-        }
-        GrowBBox(bbox, hasBBox,
-                 (LONG)debugBox.left - 1, (LONG)debugBox.top - 1,
-                 (LONG)debugBox.right + 1, (LONG)debugBox.bottom + 1);
-    }
-
-    // Green "+" marking the exact trail start (head point).
-    if (settings.debugShowOutline && !smoothed.empty() && render.pDebugBrushGreen) {
-        float hx = smoothed[0].x;
-        float hy = smoothed[0].y;
-        const float half = 8.0f;
-        render.pDCRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-        render.pDCRenderTarget->DrawLine(D2D1::Point2F(hx - half, hy),
-                                    D2D1::Point2F(hx + half, hy), render.pDebugBrushGreen, 2.0f);
-        render.pDCRenderTarget->DrawLine(D2D1::Point2F(hx, hy - half),
-                                    D2D1::Point2F(hx, hy + half), render.pDebugBrushGreen, 2.0f);
-        GrowBBox(bbox, hasBBox,
-                 (LONG)hx - (LONG)half - 1, (LONG)hy - (LONG)half - 1,
-                 (LONG)hx + (LONG)half + 1, (LONG)hy + (LONG)half + 1);
-    }
 }
 
 // Blits the backbuffer to the overlay window via UpdateLayeredWindow, using a
@@ -2972,86 +2875,6 @@ static void RenderToggleEffect(const std::vector<D2D1_POINT_2F>& smoothed,
              (LONG)(cx + margin), (LONG)(cy + margin));
 }
 
-// --- Debug: static tail preview --------------------------------------------
-// Draws a fixed horizontal preview of the trail's appearance to the left of the
-// cursor, so it can be tuned without moving the mouse. It reuses the style
-// renderers, so width/color/opacity/size/replace and the gradients all match the
-// real trail; only the animated (position/age) parts are omitted.
-static const float kPreviewLength = 500.0f;
-static const float kPreviewOffsetY = 50.0f;
-static const int   kPreviewLinePoints = 64;
-static const int   kPreviewMaxCopies = 512;
-
-static void RenderTailPreview(const POINT& pt, int vX, int vY,
-                              RECT& bbox, bool& hasBBox) {
-    if (!render.pDCRenderTarget) return;
-
-    // Head sits flush at the cursor's x; the tail extends leftward.
-    float rightX = (float)(pt.x - vX);
-    float cy = (float)(pt.y - kPreviewOffsetY - vY);
-
-    if (settings.isGhost) {
-        HCURSOR h = cursor.cachedCursor;
-        if (!h) return;
-        CursorGeom g;
-        if (!GetCursorGeom(h, g)) return;
-
-        // Copy count: the configured Copies when size-based, otherwise as many
-        // as fit over the preview length at the configured spawn spacing.
-        int count;
-        if (settings.sizeBased) {
-            count = settings.tailSize;
-        } else {
-            float spacing = settings.ghostSpawnDist;
-            if (spacing < 1.0f) spacing = 1.0f;
-            count = (int)(kPreviewLength / spacing) + 1;
-        }
-        if (count < 2) count = 2;
-        if (count > kPreviewMaxCopies) count = kPreviewMaxCopies;
-
-        std::vector<D2D1_POINT_2F> points;
-        std::vector<HCURSOR> cursors;
-        std::vector<float> ratios;
-        points.reserve(count);
-        cursors.reserve(count);
-        ratios.reserve(count);
-        for (int i = 0; i < count; ++i) {
-            float t = (float)i / (float)(count - 1);
-            // Head at the right end, tail to the left.
-            points.push_back(D2D1::Point2F(rightX - t * kPreviewLength, cy));
-            cursors.push_back(h);
-            ratios.push_back(t);
-        }
-        RenderCursorGhostStyle(points, cursors, ratios);
-
-        float w = g.bmWidth * g.dpiScaleX * settings.ghostSizeMax;
-        float hh = g.bmHeight * g.dpiScaleY * settings.ghostSizeMax;
-        GrowBBox(bbox, hasBBox,
-                 (LONG)(rightX - kPreviewLength - w), (LONG)(cy - hh),
-                 (LONG)(rightX + w), (LONG)(cy + hh));
-    } else {
-        float maxWidth = 1.0f;
-        for (float w : settings.simpleLineWidths) {
-            if (w > maxWidth) maxWidth = w;
-        }
-
-        std::vector<D2D1_POINT_2F> points;
-        points.reserve(kPreviewLinePoints);
-        for (int i = 0; i < kPreviewLinePoints; ++i) {
-            float t = (float)i / (float)(kPreviewLinePoints - 1);
-            points.push_back(D2D1::Point2F(rightX - t * kPreviewLength, cy));
-        }
-        RenderSimpleLineStyle(points);
-
-        float margin = maxWidth * 0.5f + 2.0f;
-        GrowBBox(bbox, hasBBox,
-                 (LONG)(rightX - kPreviewLength), (LONG)(cy - margin),
-                 (LONG)(rightX), (LONG)(cy + margin));
-    }
-
-    runtime.needsClear = true;
-}
-
 VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime) {
     UNREFERENCED_PARAMETER(uMsg);
     UNREFERENCED_PARAMETER(idEvent);
@@ -3073,9 +2896,6 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
     bool gameRunning = runtime.isGameRunning.load();
     bool suppress = gameRunning || !runtime.trailEnabled.load();
     bool effectActive = toggleEffect.active;
-    // The static tail preview is independent of the enable/disable hotkey, but
-    // stays paused while a fullscreen game runs.
-    bool previewActive = settings.debugShowTailPreview && !gameRunning;
 
     int vX = GetSystemMetrics(SM_XVIRTUALSCREEN);
     int vY = GetSystemMetrics(SM_YVIRTUALSCREEN);
@@ -3083,9 +2903,9 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
     int vH = GetSystemMetrics(SM_CYVIRTUALSCREEN) - 1;
 
     if (suppress) {
-        // Keep the cursor geometry fresh so the toggle circle and the tail
-        // preview can follow the cursor even while the trail itself is off.
-        if (effectActive || previewActive) {
+        // Keep the cursor geometry fresh so the toggle circle can follow the
+        // cursor even while the trail itself is off.
+        if (effectActive) {
             UpdateCursorCenterOffset();
         }
         // Decide whether there is anything to draw while holding the lock, but
@@ -3095,15 +2915,14 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
             std::lock_guard<std::mutex> lock(runtime.historyMutex);
             bool wasEmpty = runtime.history.empty();
             runtime.history.clear();
-            nothingToDraw = wasEmpty && !runtime.needsClear &&
-                            !effectActive && !previewActive;
+            nothingToDraw = wasEmpty && !runtime.needsClear && !effectActive;
             if (nothingToDraw) {
                 // Nothing is staged for drawing after the wipe; mark the current
                 // content as rendered so EnterIdleIfInactive may stop the timer.
                 runtime.renderedRevision =
                     runtime.contentRevision.load(std::memory_order_relaxed);
             } else {
-                // Something was on screen (or an effect/preview is pending);
+                // Something was on screen (or an effect is pending);
                 // force a frame so it gets erased instead of being skipped.
                 MarkContentChanged();
             }
@@ -3145,11 +2964,8 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
     // A single sample draws nothing, so it doesn't count.
     bool timeDependent = settings.isGhost && !settings.sizeBased &&
                          historyCount >= 2;
-    bool debugActive = settings.debugShowOutline && cursor.bmWidth > 0 &&
-                       cursor.bmHeight > 0;
     bool wantDraw = contentChanged || settingsChanged || timeDependent ||
-                    runtime.needsClear || effectActive || previewActive ||
-                    debugActive;
+                    runtime.needsClear || effectActive;
 
     if (wantDraw) {
         // Something is being drawn this frame; keep the overlay awake.
@@ -3197,12 +3013,6 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
             RenderTrail(smoothed, cursors, ratios);
 
             RenderToggleEffect(smoothed, curBBox, hasCurBBox);
-
-            if (previewActive) {
-                RenderTailPreview(pt, vX, vY, curBBox, hasCurBBox);
-            }
-
-            DrawDebug(pt, vX, vY, smoothed, curBBox, hasCurBBox);
 
             HRESULT hr = render.pDCRenderTarget->EndDraw();
             if (hr == D2DERR_RECREATE_TARGET) {
