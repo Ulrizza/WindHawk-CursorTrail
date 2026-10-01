@@ -1014,7 +1014,9 @@ static void LoadCommonTrailSettings(const wchar_t* prefix) {
     settings.sizeBased    = ReadStringSetting(key(L"trail_mode").c_str(), L"time_based") == L"size_based";
     settings.tailDuration = Wh_GetIntSetting(key(L"timeBased.tail_duration").c_str());
     settings.tailSize     = Wh_GetIntSetting(key(L"sizeBased.tail_size").c_str());
-    settings.sizeTimeout  = Wh_GetIntSetting(key(L"sizeBased.timeout").c_str());
+    int sizeTimeout = Wh_GetIntSetting(key(L"sizeBased.timeout").c_str());
+    if (sizeTimeout < 0) sizeTimeout = 0;   // clamp before the unsigned conversion
+    settings.sizeTimeout  = (DWORD)sizeTimeout;
 
     ParseFloatList(key(L"opacity.values").c_str(), L"100", 0.0f, 100.0f, 100.0f, settings.opacityValues);
     for (float& v : settings.opacityValues) v /= 100.0f;
@@ -1161,7 +1163,6 @@ void LoadSettings() {
     } else {
         if (settings.tailSize < 20) settings.tailSize = 20;
     }
-    if (settings.sizeTimeout < 0) settings.sizeTimeout = 0;
 
     // Parse width values (min 1, no upper clamp)
     ParseFloatList(L"simpleLineOptions.width.values", L"1", 1.0f, 1e30f, 1.0f, settings.simpleLineWidths);
