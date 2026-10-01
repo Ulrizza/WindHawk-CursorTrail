@@ -409,7 +409,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 
 - `WhTool_ModInit` — `LoadSettings()` then spawns `OverlayThreadProc`.
 - `WhTool_ModSettingsChanged` — posts `kMsgApplySettings` (reloads settings on the overlay thread under `runtime.historyMutex`) and `kMsgApplyHotkey` to re-register the hotkey on its thread.
-- `WhTool_ModUninit` — signals the poll thread, kills the timer, and posts `WM_QUIT`.
+- `WhTool_ModUninit` — signals the poll thread and posts `WM_QUIT` to the overlay window; the overlay thread tears itself down (timer, Direct2D, window) and is joined with an unbounded wait.
 - The overlay thread registers the `hotkeyOptions.key` setting (`ApplyHotkey`) right after creating the window and unregisters it before destroying the window. `WM_HOTKEY` flips `runtime.trailEnabled`, which suppresses sampling/rendering like the fullscreen-game path does, and (when `hotkeyOptions.animate` is on) calls `StartToggleEffect` to play the circle animation centered on the trail head (disable: grows + fades out, ease in; enable: shrinks + fades in, ease out; 400 ms, 2px outline, diameter 6× the cursor, colored by `GetCursorColor`'s ghost-`auto` pick, following the cursor).
 - The `Wh_ModInit` / `Wh_ModAfterInit` / `Wh_ModUninit` block at the bottom of the file is Windhawk's tool-mod launcher boilerplate and should be left as-is.
 
