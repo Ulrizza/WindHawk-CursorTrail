@@ -23,7 +23,7 @@ I always liked the original Windows cursor trail, but it was too limited, so I m
 If you see any bug or want more settings/features, add an issue on the [Github repo](https://github.com/Ulrizza/WindHawk-CursorTrail)!  
 I cannot promise you anything because I don't have much free time but I enjoyed making this plugin so I'll do my best 🤘
 
-**Disclamer:** I used AI to make this project, I just wanted a custom cursor trail and now I have it so I'm happy. If you are botherded by that, just don't install it.
+**Disclaimer:** I used AI to make this project, I just wanted a custom cursor trail and now I have it so I'm happy. If you are bothered by that, just don't install it.
 
 ## Installation
 
@@ -370,67 +370,11 @@ Fine-tune the trail origin horizontally in pixels (auto-centered by default, 0 =
 `15 15`  
 ![tail_offset.y = +10](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/tail_offset.15.15.gif)
 
-## Architecture
-
-The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scope, grouped into five struct instances:
-
-| Instance | Type | Purpose |
-|---|---|---|
-| `settings` | `Settings` | Parsed settings (tail geometry, style, width/color/opacity, trail offset). Written by `LoadSettings()` on the overlay thread (under `runtime.historyMutex`), read by the render and poll threads. |
-| `cursor` | `CursorState` | Cursor geometry cache: `visualOffset` (mutex-protected) plus render-thread-only cursor dims (`bmWidth`/`bmHeight`/DPI scale) and the per-`HCURSOR` `geomCache`. |
-| `origin` | `OriginTransition` | Poll-thread-owned ease-in-out state for the trail-origin glide on cursor-image change. |
-| `render` | `RenderResources` | Direct2D factory/target/brushes, stroke style, the cached backbuffer, and the per-`HCURSOR` `cursorBitmapCache` (tinted bitmap variants) used by the ghost style. Render-thread-only. |
-| `runtime` | `Runtime` | Overlay window/threads, the `history` deque, atomics, multimedia timer, and per-frame render state. |
-
-### Threads
-
-- **Overlay thread** (`OverlayThreadProc`) — creates the `WS_EX_LAYERED` topmost window, runs the message loop, and does all Direct2D rendering via `SmearTimerProc`.
-- **Poll thread** (`PollThreadProc`) — samples the cursor every 1 ms and pushes decimated samples into `runtime.history`.
-- **Multimedia timer** (`MMTimerCallback`, a system thread) — posts `WM_TIMER` at ~125 Hz to wake the overlay thread. It never touches Direct2D directly.
-
-### Locking model
-
-- `runtime.historyMutex` protects `runtime.history` (poll + render threads) and serializes `LoadSettings()` (run on the overlay thread) against the poll thread's settings reads.
-- `cursor.offsetMutex` protects `cursor.visualOffset` (written by render thread, read by poll thread).
-- Lock order is always `runtime.historyMutex` → `cursor.offsetMutex`.
-- `runtime.isGameRunning`, `runtime.cursorHidden`, `runtime.renderScheduled`, and `runtime.trailEnabled` are atomics.
-- `origin.*`, `render.*`, and the cursor dimensions are single-thread owned (see table above).
-
-### Render pipeline
-
-`SmearTimerProc` is a thin orchestrator that delegates to helpers, in order:
-
-1. `EnsureBackbuffer` / `EnsureRenderTarget` — (re)create the backbuffer bitmap and D2D render target.
-2. `BuildTrailPoints` — snapshot `runtime.history`; the line style spatially decimates it, while the ghost style emits every latched copy in order, producing a parallel per-point `HCURSOR` list and (ghost only) a per-point opacity `ratio` list.
-3. `ChaikinSmooth` (Simple line only) — two-pass corner smoothing; the ghost style draws its latched copies directly so its copy count matches the setting.
-4. `ComputeTrailBBox` — trail bounding box plus stroke-width (line) or cursor-size (ghost) margin.
-5. `RenderTrail` — dispatch to the active style renderer (`RenderSimpleLineStyle` or `RenderCursorGhostStyle`); both paint tail → head so the newest part stays on top at self-crossings.
-6. `RenderToggleEffect` — optional enable/disable hotkey circle (2px outline, centered on the trail head, follows the cursor).
-7. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
-8. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
-
-### Settings & blending
-
-- `LoadSettings` uses `ReadStringSetting`, `ParseFloatList`, `SplitAndTrim`, and `ParseHexColor`, and precomputes color band boundaries (`settings.colorBandStart`/`colorBandEnd`) and opacity alphas (`settings.opacityValues`, stored as 0–1) so the hot path does no parsing or per-frame allocation. `LoadCommonTrailSettings(prefix)` reads the settings shared by both styles (trail mode, tail duration/size, timeout, opacity) from `ghostOptions` or `simpleLineOptions`, and `LoadColorSettings(prefix, defaultColor)` reads the per-style color gradient into `settings.activeColorsRGB` (and precomputes the ghost tint samples into `settings.ghostTints`); `TrailPointBudget`/`AutoPointSpacing` hold the shared point-count and spacing formulas.
-- `GetBlendedColor`, `InterpolateValues`, and `InterpolateOpacity` are allocation-free; `Ease` applies the smoothstep easing curve.
-
-### Cursor geometry
-
-`UpdateCursorCenterOffset` caches, per `HCURSOR`: the visible-pixel-center offset (the line-style trail origin), the hotspot, the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt only when the cursor handle changes. The geometry is computed without holding `cursor.offsetMutex` (only `visualOffset` is published under the lock), and the visible-bounds scan plus the cursor-bitmap building share one lazily-created `IWICImagingFactory` released at teardown. `ComputeCursorGeom` holds the shared computation; `GetCursorGeom` lazily computes geometry for any cursor handle still referenced by the trail (so the ghost style can draw older images after an image change). Ghost samples store the raw cursor hotspot, and the ghost renderer anchors each copy by its own image's hotspot, so a copy lands exactly where that cursor image was — independent of the render thread's offset refresh. The ghost style also builds and caches D2D bitmaps per `HCURSOR` via `EnsureCursorBitmap`, rendering the cursor with `DrawIconEx` at the on-screen pixel size (color + mask + anti-aliased alpha) so copies are blitted 1:1 without resampling. The `ghostOptions.color` gradient (when set) is baked into the cached pixels by sampling it at `kGhostTintSteps` ratios (one bitmap per sample; an empty color list yields a single untinted variant), and `GetCursorBitmap(hCursor, ratio)` selects the nearest variant for each copy. `color.replace.mode` picks the pixels to recolor: `whole` swaps every non-transparent pixel; `auto` splits each pixel between two reference colors — the replace color (the cursor's enclosed center color from `AnalyzeCursorColors`, falling back to the largest region when nothing is enclosed) and a keep color (the largest boundary/outline region) — swapping pixels closer to the replace color with a small softness band around the midpoint; `custom` replaces pixels whose color matches `color.replace.custom` (soft falloff so anti-aliased edges blend), leaving every other color untouched. Both caches are released with the render target.
-
-### Lifecycle
-
-- `WhTool_ModInit` — `LoadSettings()` then spawns `OverlayThreadProc`.
-- `WhTool_ModSettingsChanged` — posts `kMsgApplySettings` (reloads settings on the overlay thread under `runtime.historyMutex`) and `kMsgApplyHotkey` to re-register the hotkey on its thread.
-- `WhTool_ModUninit` — signals the poll thread and posts `WM_QUIT` to the overlay window; the overlay thread tears itself down (timer, Direct2D, window) and is joined with an unbounded wait.
-- The overlay thread registers the `hotkeyOptions.key` setting (`ApplyHotkey`) right after creating the window and unregisters it before destroying the window. `WM_HOTKEY` flips `runtime.trailEnabled`, which suppresses sampling/rendering like the fullscreen-game path does, and (when `hotkeyOptions.animate` is on) calls `StartToggleEffect` to play the circle animation centered on the trail head (disable: grows + fades out, ease in; enable: shrinks + fades in, ease out; 400 ms, 2px outline, diameter 6× the cursor, colored by `GetCursorColor`'s ghost-`auto` pick, following the cursor).
-- The `Wh_ModInit` / `Wh_ModAfterInit` / `Wh_ModUninit` block at the bottom of the file is Windhawk's tool-mod launcher boilerplate and should be left as-is.
-
 ## Licence
 
 This project is licensed under the MIT License. You're free to use, modify, and
 redistribute the code as long as you keep the original copyright notice and
-credit the author (Ulrizza). See [LICENSE](LICENSE) for the full text.
+credit the author (Ulrizza). See [LICENSE](https://github.com/Ulrizza/WindHawk-CursorTrail/blob/main/LICENSE) for the full text.
 
 Part of this mod is adapted from
 [Cursor Motion Blur](https://windhawk.net/mods/cursor-motion-blur) by

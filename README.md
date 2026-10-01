@@ -9,7 +9,7 @@ I always liked the original Windows cursor trail, but it was too limited, so I m
 If you see any bug or want more settings/features, add an issue on the [Github repo](https://github.com/Ulrizza/WindHawk-CursorTrail)!  
 I cannot promise you anything because I don't have much free time but I enjoyed making this plugin so I'll do my best 🤘
 
-**Disclamer:** I used AI to make this project, I just wanted a custom cursor trail and now I have it so I'm happy. If you are botherded by that, just don't install it.
+**Disclaimer:** I used AI to make this project, I just wanted a custom cursor trail and now I have it so I'm happy. If you are bothered by that, just don't install it.
 
 ## Installation
 
@@ -416,7 +416,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 
 This project is licensed under the MIT License. You're free to use, modify, and
 redistribute the code as long as you keep the original copyright notice and
-credit the author (Ulrizza). See [LICENSE](LICENSE) for the full text.
+credit the author (Ulrizza). See [LICENSE](https://github.com/Ulrizza/WindHawk-CursorTrail/blob/main/LICENSE) for the full text.
 
 Part of this mod is adapted from
 [Cursor Motion Blur](https://windhawk.net/mods/cursor-motion-blur) by
