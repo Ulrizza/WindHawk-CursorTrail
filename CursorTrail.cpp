@@ -416,7 +416,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 
 ### Cursor geometry
 
-`UpdateCursorCenterOffset` caches, per `HCURSOR`: the visible-pixel-center offset (the line-style trail origin), the hotspot, the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt only when the cursor handle changes. `ComputeCursorGeom` holds the shared computation; `GetCursorGeom` lazily computes geometry for any cursor handle still referenced by the trail (so the ghost style can draw older images after an image change). Ghost samples store the raw cursor hotspot, and the ghost renderer anchors each copy by its own image's hotspot, so a copy lands exactly where that cursor image was — independent of the render thread's offset refresh. The ghost style also builds and caches D2D bitmaps per `HCURSOR` via `EnsureCursorBitmap`, rendering the cursor with `DrawIconEx` at the on-screen pixel size (color + mask + anti-aliased alpha) so copies are blitted 1:1 without resampling. The `ghostOptions.color` gradient (when set) is baked into the cached pixels by sampling it at `kGhostTintSteps` ratios (one bitmap per sample; an empty color list yields a single untinted variant), and `GetCursorBitmap(hCursor, ratio)` selects the nearest variant for each copy. `color.replace.mode` picks the pixels to recolor: `whole` swaps every non-transparent pixel; `auto` splits each pixel between two reference colors — the replace color (the cursor's enclosed center color from `AnalyzeCursorColors`, falling back to the largest region when nothing is enclosed) and a keep color (the largest boundary/outline region) — swapping pixels closer to the replace color with a small softness band around the midpoint; `custom` replaces pixels whose color matches `color.replace.custom` (soft falloff so anti-aliased edges blend), leaving every other color untouched. Both caches are released with the render target.
+`UpdateCursorCenterOffset` caches, per `HCURSOR`: the visible-pixel-center offset (the line-style trail origin), the hotspot, the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt only when the cursor handle changes. The geometry is computed without holding `cursor.offsetMutex` (only `visualOffset` is published under the lock), and the visible-bounds scan plus the cursor-bitmap building share one lazily-created `IWICImagingFactory` released at teardown. `ComputeCursorGeom` holds the shared computation; `GetCursorGeom` lazily computes geometry for any cursor handle still referenced by the trail (so the ghost style can draw older images after an image change). Ghost samples store the raw cursor hotspot, and the ghost renderer anchors each copy by its own image's hotspot, so a copy lands exactly where that cursor image was — independent of the render thread's offset refresh. The ghost style also builds and caches D2D bitmaps per `HCURSOR` via `EnsureCursorBitmap`, rendering the cursor with `DrawIconEx` at the on-screen pixel size (color + mask + anti-aliased alpha) so copies are blitted 1:1 without resampling. The `ghostOptions.color` gradient (when set) is baked into the cached pixels by sampling it at `kGhostTintSteps` ratios (one bitmap per sample; an empty color list yields a single untinted variant), and `GetCursorBitmap(hCursor, ratio)` selects the nearest variant for each copy. `color.replace.mode` picks the pixels to recolor: `whole` swaps every non-transparent pixel; `auto` splits each pixel between two reference colors — the replace color (the cursor's enclosed center color from `AnalyzeCursorColors`, falling back to the largest region when nothing is enclosed) and a keep color (the largest boundary/outline region) — swapping pixels closer to the replace color with a small softness band around the midpoint; `custom` replaces pixels whose color matches `color.replace.custom` (soft falloff so anti-aliased edges blend), leaving every other color untouched. Both caches are released with the render target.
 
 ### Lifecycle
 
@@ -1293,6 +1293,19 @@ static void ResolveCursorBitmapDimensions(ICONINFO& ii, int& bmWidth, int& bmHei
     }
 }
 
+// Single shared WIC imaging factory (render-thread-only). Created lazily on
+// first use and released when the overlay thread tears down; creating one per
+// call (as ComputeVisibleBounds / EnsureCursorBitmap used to) is wasteful.
+static IWICImagingFactory* g_pWicFactory = nullptr;
+
+static IWICImagingFactory* GetWicFactory() {
+    if (!g_pWicFactory) {
+        CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
+                         IID_PPV_ARGS(&g_pWicFactory));
+    }
+    return g_pWicFactory;
+}
+
 // Computes the visible (non-transparent) pixel bounds of a cursor HBITMAP by
 // scanning its alpha channel (threshold 8 ignores faint anti-aliased edges).
 // Bounds are in bitmap pixel coordinates (right/bottom exclusive). Uses WIC
@@ -1301,13 +1314,11 @@ static void ComputeVisibleBounds(HBITMAP hbm, int& left, int& top, int& right, i
     left = top = right = bottom = 0;
     valid = false;
 
-    IWICImagingFactory* pWicFactory = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
-                                  IID_PPV_ARGS(&pWicFactory));
-    if (FAILED(hr) || !pWicFactory) return;
+    IWICImagingFactory* pWicFactory = GetWicFactory();
+    if (!pWicFactory) return;
 
     IWICBitmap* pWicBitmap = nullptr;
-    hr = pWicFactory->CreateBitmapFromHBITMAP(hbm, NULL,
+    HRESULT hr = pWicFactory->CreateBitmapFromHBITMAP(hbm, NULL,
         WICBitmapUsePremultipliedAlpha, &pWicBitmap);
     if (SUCCEEDED(hr) && pWicBitmap) {
         UINT w = 0, h = 0;
@@ -1342,7 +1353,6 @@ static void ComputeVisibleBounds(HBITMAP hbm, int& left, int& top, int& right, i
         }
         pWicBitmap->Release();
     }
-    pWicFactory->Release();
 }
 
 // Computes geometry for one cursor image (bitmap dims, DPI scale, hotspot to
@@ -1396,10 +1406,9 @@ static bool ComputeCursorGeom(HCURSOR hCursor, CursorGeom& g) {
 // thread (trail origin); the full per-cursor geometry lives in cursor.geomCache
 // so the ghost style can place older cursor images too.
 void UpdateCursorCenterOffset() {
-    std::lock_guard<std::mutex> lock(cursor.offsetMutex);
-
     CURSORINFO ci = { sizeof(CURSORINFO) };
     if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
+        std::lock_guard<std::mutex> lock(cursor.offsetMutex);
         runtime.cursorHidden.store(true);
         cursor.visualOffset = { 0, 0 };
         cursor.bmWidth = 0;
@@ -1409,12 +1418,19 @@ void UpdateCursorCenterOffset() {
     }
     runtime.cursorHidden.store(false);
 
-    if (ci.hCursor == cursor.cachedCursor) {
-        return;  // same cursor as last frame, reuse cached geometry
+    {
+        std::lock_guard<std::mutex> lock(cursor.offsetMutex);
+        if (ci.hCursor == cursor.cachedCursor) {
+            return;  // same cursor as last frame, reuse cached geometry
+        }
     }
 
+    // Compute the geometry WITHOUT holding offsetMutex: this does a WIC
+    // factory call, a pixel scan, and registry/DPI reads, and the poll thread
+    // takes the same lock briefly every sample just to read visualOffset.
     CursorGeom g;
     if (!ComputeCursorGeom(ci.hCursor, g)) {
+        std::lock_guard<std::mutex> lock(cursor.offsetMutex);
         cursor.visualOffset = { 0, 0 };
         cursor.bmWidth = 0;
         cursor.bmHeight = 0;
@@ -1422,6 +1438,7 @@ void UpdateCursorCenterOffset() {
         return;
     }
 
+    std::lock_guard<std::mutex> lock(cursor.offsetMutex);
     cursor.geomCache[ci.hCursor] = g;
 
     cursor.visualOffset = g.visualOffset;
@@ -1683,10 +1700,8 @@ static void EnsureCursorBitmap(HCURSOR hCursor, int targetW, int targetH) {
     SelectObject(hdcMem, hOld);
     DeleteDC(hdcMem);
 
-    IWICImagingFactory* pWicFactory = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
-                                  IID_PPV_ARGS(&pWicFactory));
-    if (SUCCEEDED(hr) && pWicFactory) {
+    IWICImagingFactory* pWicFactory = GetWicFactory();
+    if (pWicFactory) {
         size_t pixelBytes = (size_t)targetW * targetH * 4;
         size_t pixelCount = (size_t)targetW * targetH;
 
@@ -1796,7 +1811,7 @@ static void EnsureCursorBitmap(HCURSOR hCursor, int targetW, int targetH) {
             }
 
             IWICBitmap* pWicBitmap = nullptr;
-            hr = pWicFactory->CreateBitmapFromMemory(
+            HRESULT hr = pWicFactory->CreateBitmapFromMemory(
                 (UINT)targetW, (UINT)targetH, GUID_WICPixelFormat32bppPBGRA,
                 (UINT)targetW * 4, (UINT)pixelBytes,
                 scratch.data(), &pWicBitmap);
@@ -1812,7 +1827,6 @@ static void EnsureCursorBitmap(HCURSOR hCursor, int targetW, int targetH) {
                 pWicBitmap->Release();
             }
         }
-        pWicFactory->Release();
     }
 
     DeleteObject(hDib);
@@ -3224,6 +3238,7 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     DestroyWindow(runtime.overlayHwnd);
     UnregisterClass(CLASS_NAME, hInstance);
 
+    if (g_pWicFactory) { g_pWicFactory->Release(); g_pWicFactory = nullptr; }
     CoUninitialize();
     return 0;
 }
