@@ -3083,7 +3083,7 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     // Direct2D demands COM to be initialized on this thread before it will talk to us
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
-    // Tell Windows we aren't a blurry legacy piece of shit so mixed-DPI monitors don't fuck up the math
+    // Enable per-monitor DPI awareness so mixed-DPI monitors scale correctly.
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &render.pD2DFactory);

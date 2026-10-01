@@ -16,15 +16,15 @@ Line numbers refer to `mods/cursor-trail.wh.cpp` in the fork.
 
 ## Optional improvements (decide per item)
 
-- [ ] 6. Load settings on overlay thread (fix settings↔render/poll race) — `kMsgApplySettings` under `historyMutex`
-- [ ] 7. Drop `TerminateThread`; simplify shutdown (post to `overlayHwnd`, `INFINITE` join, remove `timeKillEvent`+`Sleep`)
-- [ ] 8. Remove dead debug code (`debugShowOutline`/`debugShowTailPreview`, `DrawDebug`, `RenderTailPreview`, debug brushes)
-- [ ] 9. Don't hold `cursor.offsetMutex` during `ComputeCursorGeom`; create one shared `IWICImagingFactory`
-- [ ] 10a. Move "Architecture" section out of catalog README (→ GitHub repo)
-- [ ] 10b. Fix relative `[LICENSE](LICENSE)` link (won't resolve in Windhawk)
-- [ ] 10c. Fix typos: "Disclamer", "botherded" (line 26)
-- [ ] 11. Fix `settings.sizeTimeout` DWORD negative check (line 1203)
-- [ ] 12. Reword profane comment inherited from Cursor Motion Blur (line 3068)
+- [x] 6. Load settings on overlay thread (fix settings↔render/poll race) — `kMsgApplySettings` under `historyMutex`
+- [x] 7. Drop `TerminateThread`; simplify shutdown (post to `overlayHwnd`, `INFINITE` join, remove `timeKillEvent`+`Sleep`)
+- [x] 8. Remove dead debug code (`debugShowOutline`/`debugShowTailPreview`, `DrawDebug`, `RenderTailPreview`, debug brushes)
+- [x] 9. Don't hold `cursor.offsetMutex` during `ComputeCursorGeom`; create one shared `IWICImagingFactory`
+- [x] 10a. Move "Architecture" section out of catalog README (→ GitHub repo)
+- [x] 10b. Fix relative `[LICENSE](LICENSE)` link (won't resolve in Windhawk)
+- [x] 10c. Fix typos: "Disclamer", "botherded" (line 26)
+- [x] 11. Fix `settings.sizeTimeout` DWORD negative check (line 1203)
+- [x] 12. Reword profane comment inherited from Cursor Motion Blur (line 3068)
 
 ## Functionality notes (non-critical ideas)
 
