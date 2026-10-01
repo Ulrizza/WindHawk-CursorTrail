@@ -362,7 +362,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 
 | Instance | Type | Purpose |
 |---|---|---|
-| `settings` | `Settings` | Parsed settings (tail geometry, style, width/color/opacity, trail offset). Written by `LoadSettings()`, read by all threads. |
+| `settings` | `Settings` | Parsed settings (tail geometry, style, width/color/opacity, trail offset). Written by `LoadSettings()` on the overlay thread (under `runtime.historyMutex`), read by the render and poll threads. |
 | `cursor` | `CursorState` | Cursor geometry cache: `centerOffset`/`visualOffset` (mutex-protected) plus render-thread-only debug dims and the per-`HCURSOR` `geomCache`. |
 | `origin` | `OriginTransition` | Poll-thread-owned ease-in-out state for the trail-origin glide on cursor-image change. |
 | `render` | `RenderResources` | Direct2D factory/target/brushes, stroke style, the cached backbuffer, and the per-`HCURSOR` `cursorBitmapCache` (tinted bitmap variants) used by the ghost style. Render-thread-only. |
@@ -376,7 +376,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 
 ### Locking model
 
-- `runtime.historyMutex` protects `runtime.history` (poll + render threads).
+- `runtime.historyMutex` protects `runtime.history` (poll + render threads) and serializes `LoadSettings()` (run on the overlay thread) against the poll thread's settings reads.
 - `cursor.offsetMutex` protects `cursor.centerOffset` / `cursor.visualOffset` (written by render thread, read by poll thread).
 - Lock order is always `runtime.historyMutex` → `cursor.offsetMutex`.
 - `runtime.isGameRunning`, `runtime.cursorHidden`, `runtime.renderScheduled`, and `runtime.trailEnabled` are atomics.
@@ -408,7 +408,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 ### Lifecycle
 
 - `WhTool_ModInit` — `LoadSettings()` then spawns `OverlayThreadProc`.
-- `WhTool_ModSettingsChanged` — `LoadSettings()`, then posts `kMsgApplyHotkey` to the overlay window to re-register the hotkey on its thread.
+- `WhTool_ModSettingsChanged` — posts `kMsgApplySettings` (reloads settings on the overlay thread under `runtime.historyMutex`) and `kMsgApplyHotkey` to re-register the hotkey on its thread.
 - `WhTool_ModUninit` — signals the poll thread, kills the timer, and posts `WM_QUIT`.
 - The overlay thread registers the `hotkeyOptions.key` setting (`ApplyHotkey`) right after creating the window and unregisters it before destroying the window. `WM_HOTKEY` flips `runtime.trailEnabled`, which suppresses sampling/rendering like the fullscreen-game path does, and (when `hotkeyOptions.animate` is on) calls `StartToggleEffect` to play the circle animation centered on the trail head (disable: grows + fades out, ease in; enable: shrinks + fades in, ease out; 400 ms, 2px outline, diameter 6× the cursor, colored by `GetCursorColor`'s ghost-`auto` pick, following the cursor).
 - The `Wh_ModInit` / `Wh_ModAfterInit` / `Wh_ModUninit` block at the bottom of the file is Windhawk's tool-mod launcher boilerplate and should be left as-is.

@@ -376,7 +376,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 
 | Instance | Type | Purpose |
 |---|---|---|
-| `settings` | `Settings` | Parsed settings (tail geometry, style, width/color/opacity, trail offset). Written by `LoadSettings()`, read by all threads. |
+| `settings` | `Settings` | Parsed settings (tail geometry, style, width/color/opacity, trail offset). Written by `LoadSettings()` on the overlay thread (under `runtime.historyMutex`), read by the render and poll threads. |
 | `cursor` | `CursorState` | Cursor geometry cache: `centerOffset`/`visualOffset` (mutex-protected) plus render-thread-only debug dims and the per-`HCURSOR` `geomCache`. |
 | `origin` | `OriginTransition` | Poll-thread-owned ease-in-out state for the trail-origin glide on cursor-image change. |
 | `render` | `RenderResources` | Direct2D factory/target/brushes, stroke style, the cached backbuffer, and the per-`HCURSOR` `cursorBitmapCache` (tinted bitmap variants) used by the ghost style. Render-thread-only. |
@@ -390,7 +390,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 
 ### Locking model
 
-- `runtime.historyMutex` protects `runtime.history` (poll + render threads).
+- `runtime.historyMutex` protects `runtime.history` (poll + render threads) and serializes `LoadSettings()` (run on the overlay thread) against the poll thread's settings reads.
 - `cursor.offsetMutex` protects `cursor.centerOffset` / `cursor.visualOffset` (written by render thread, read by poll thread).
 - Lock order is always `runtime.historyMutex` → `cursor.offsetMutex`.
 - `runtime.isGameRunning`, `runtime.cursorHidden`, `runtime.renderScheduled`, and `runtime.trailEnabled` are atomics.
@@ -422,7 +422,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 ### Lifecycle
 
 - `WhTool_ModInit` — `LoadSettings()` then spawns `OverlayThreadProc`.
-- `WhTool_ModSettingsChanged` — `LoadSettings()`, then posts `kMsgApplyHotkey` to the overlay window to re-register the hotkey on its thread.
+- `WhTool_ModSettingsChanged` — posts `kMsgApplySettings` (reloads settings on the overlay thread under `runtime.historyMutex`) and `kMsgApplyHotkey` to re-register the hotkey on its thread.
 - `WhTool_ModUninit` — signals the poll thread, kills the timer, and posts `WM_QUIT`.
 - The overlay thread registers the `hotkeyOptions.key` setting (`ApplyHotkey`) right after creating the window and unregisters it before destroying the window. `WM_HOTKEY` flips `runtime.trailEnabled`, which suppresses sampling/rendering like the fullscreen-game path does, and (when `hotkeyOptions.animate` is on) calls `StartToggleEffect` to play the circle animation centered on the trail head (disable: grows + fades out, ease in; enable: shrinks + fades in, ease out; 400 ms, 2px outline, diameter 6× the cursor, colored by `GetCursorColor`'s ghost-`auto` pick, following the cursor).
 - The `Wh_ModInit` / `Wh_ModAfterInit` / `Wh_ModUninit` block at the bottom of the file is Windhawk's tool-mod launcher boilerplate and should be left as-is.
@@ -894,6 +894,7 @@ static std::wstring ReadStringSetting(const wchar_t* key, const std::wstring& de
 static const int kHotkeyId = 1;
 static const UINT kMsgApplyHotkey = WM_APP + 1;
 static const UINT kMsgIdleWake = WM_APP + 2;  // poll thread -> overlay: resume rendering
+static const UINT kMsgApplySettings = WM_APP + 3;  // main thread -> overlay: reload settings
 
 // Splits on '+', trimming spaces and dropping empty tokens.
 static std::vector<std::wstring> SplitOnPlus(const std::wstring& input) {
@@ -3231,10 +3232,10 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
 
 // Custom window proc for the overlay. Handles WM_TIMER (posted by the
 // multimedia timer callback) by calling SmearTimerProc directly. Also handles
-// the enable/disable hotkey (WM_HOTKEY) and hotkey re-registration on settings
-// change (kMsgApplyHotkey). All other messages go to DefWindowProc. This keeps
-// all rendering on the overlay thread while using the multimedia timer for
-// non-coalesced wakeups.
+// the enable/disable hotkey (WM_HOTKEY), hotkey re-registration on settings
+// change (kMsgApplyHotkey), and settings reload (kMsgApplySettings). All other
+// messages go to DefWindowProc. This keeps all rendering on the overlay thread
+// while using the multimedia timer for non-coalesced wakeups.
 LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     if (uMsg == WM_TIMER) {
         // Clear before rendering so a frame that arrives while this one is still
@@ -3266,6 +3267,19 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         ResumeRenderTimer();
         runtime.lastActiveTime = GetTickCount();
         ApplyHotkey(hwnd);
+        return 0;
+    }
+    if (uMsg == kMsgApplySettings) {
+        // Settings must not change while the render thread reads them mid-frame
+        // or while the poll thread reads them under historyMutex. Handling the
+        // reload here on the overlay thread serializes it against rendering,
+        // and taking historyMutex serializes it against the poll thread.
+        ResumeRenderTimer();
+        runtime.lastActiveTime = GetTickCount();
+        {
+            std::lock_guard<std::mutex> lock(runtime.historyMutex);
+            LoadSettings();
+        }
         return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -3443,12 +3457,15 @@ void WhTool_ModUninit() {
 }
 
 void WhTool_ModSettingsChanged() {
-    LoadSettings();
-
-    // Re-register the hotkey on the overlay thread, which owns the window and
-    // its message queue (RegisterHotKey/UnregisterHotKey are thread-bound).
+    // Reload settings on the overlay thread (kMsgApplySettings) so the write
+    // doesn't race with the render/poll threads. Re-register the hotkey on the
+    // overlay thread too, which owns the window and its message queue
+    // (RegisterHotKey/UnregisterHotKey are thread-bound).
     if (runtime.overlayHwnd) {
+        PostMessage(runtime.overlayHwnd, kMsgApplySettings, 0, 0);
         PostMessage(runtime.overlayHwnd, kMsgApplyHotkey, 0, 0);
+    } else {
+        LoadSettings();  // overlay thread not running yet; no race
     }
 }
 
