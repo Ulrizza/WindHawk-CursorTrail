@@ -2147,15 +2147,19 @@ void CALLBACK MMTimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_
 // --- Idle handling ---------------------------------------------------------
 // The render timer and the 1 ms timer resolution are only needed while there is
 // something to draw. When the trail has fully faded, no toggle effect is playing
-// and the cursor is still, the overlay thread stops the multimedia timer and
-// releases the timer resolution; the poll thread then samples at a much slower
-// rate. Cursor movement (or a hotkey / settings change) wakes the overlay.
+// and the cursor is still, the overlay thread stops the multimedia timer,
+// releases the timer resolution, and hides the overlay window; the poll thread
+// then samples at a much slower rate. Cursor movement (or a hotkey / settings
+// change) wakes the overlay and shows the window again.
 
-// Re-arms the render timer and the 1 ms timer resolution. Safe to call when
-// already active. Overlay-thread-only.
+// Re-arms the render timer, the 1 ms timer resolution, and the overlay window.
+// Safe to call when already active. Overlay-thread-only.
 static void ResumeRenderTimer() {
     runtime.idleWakePending.store(false);
     runtime.overlayIdle.store(false);
+    if (runtime.overlayHwnd) {
+        ShowWindow(runtime.overlayHwnd, SW_SHOWNA);
+    }
     if (!runtime.periodRaised) {
         timeBeginPeriod(1);
         runtime.periodRaised = true;
@@ -2168,7 +2172,8 @@ static void ResumeRenderTimer() {
 // Called by the overlay thread after a frame. idleAllowed is false when the
 // frame just drew something (so there is no point idling). If the overlay has
 // been inactive for kIdleGraceMs and no content change is pending, stops the
-// render timer and releases the timer resolution. Overlay-thread-only.
+// render timer, releases the timer resolution, and hides the overlay window.
+// Overlay-thread-only.
 static void EnterIdleIfInactive(DWORD now, bool idleAllowed) {
     if (!idleAllowed) {
         return;
@@ -2202,6 +2207,9 @@ static void EnterIdleIfInactive(DWORD now, bool idleAllowed) {
     if (runtime.periodRaised) {
         timeEndPeriod(1);
         runtime.periodRaised = false;
+    }
+    if (runtime.overlayHwnd) {
+        ShowWindow(runtime.overlayHwnd, SW_HIDE);
     }
 }
 
