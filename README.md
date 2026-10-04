@@ -389,11 +389,12 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 1. `EnsureBackbuffer` / `EnsureRenderTarget` — (re)create the backbuffer bitmap and D2D render target.
 2. `BuildTrailPoints` — snapshot `runtime.history`; the line style spatially decimates it, while the ghost style emits every latched copy in order, producing a parallel per-point `HCURSOR` list and (ghost only) a per-point opacity `ratio` list.
 3. `ChaikinSmooth` (Simple line only) — two-pass corner smoothing; the ghost style draws its latched copies directly so its copy count matches the setting.
-4. `ComputeTrailBBox` — trail bounding box plus stroke-width (line) or cursor-size (ghost) margin.
-5. `RenderTrail` — dispatch to the active style renderer (`RenderSimpleLineStyle` or `RenderCursorGhostStyle`); both paint tail → head so the newest part stays on top at self-crossings.
-6. `RenderToggleEffect` — optional enable/disable hotkey circle (2px outline, centered on the trail head, follows the cursor).
-7. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
-8. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
+4. `ComputeTrailBBox` (plus `GrowToggleEffectBBox`) — trail bounding box with stroke-width (line) or cursor-size (ghost) margin, expanded for the toggle circle.
+5. Bind the render target to the dirty rect (union of this frame's bbox and the previous frame's), undo the origin shift with a translation, and `Clear` only that region — the backbuffer is not wiped in full each frame.
+6. `RenderTrail` — dispatch to the active style renderer (`RenderSimpleLineStyle` or `RenderCursorGhostStyle`); both paint tail → head so the newest part stays on top at self-crossings.
+7. `RenderToggleEffect` — optional enable/disable hotkey circle (2px outline, centered on the trail head, follows the cursor).
+8. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
+9. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
 
 ### Settings & blending
 

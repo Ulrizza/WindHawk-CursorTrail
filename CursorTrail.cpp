@@ -722,6 +722,7 @@ struct Runtime {
     RECT  prevDirtyRect = { 0, 0, 0, 0 };     // render-thread-only frame state
     bool  hasPrevDirty = false;
     bool  needsClear = false;
+    bool  needsFullClear = false;             // backbuffer just (re)created; clear the whole thing once
     unsigned long long renderedRevision = 0;  // render-thread-only; last content revision drawn
     unsigned renderedSettingsVersion = 0;     // render-thread-only; last settings version drawn
     DWORD lastFullscreenCheck = 0;
@@ -2485,6 +2486,10 @@ static void EnsureBackbuffer(HDC hdcScreen, int vW, int vH) {
         render.cachedVW = vW;
         render.cachedVH = vH;
 
+        // A freshly created bitmap holds uninitialized pixels; force a full
+        // clear on the next frame instead of relying on the dirty-rect clear.
+        runtime.needsFullClear = true;
+
         if (render.pDCRenderTarget) {
             ReleaseRenderTargetResources();
         }
@@ -2834,6 +2839,23 @@ static void RenderToggleEffect(const std::vector<D2D1_POINT_2F>& smoothed,
              (LONG)(cx + margin), (LONG)(cy + margin));
 }
 
+// Grows bbox/hasBBox to cover the toggle-effect circle's maximum extent. Uses
+// the largest possible radius (rather than the current eased radius) so the
+// clear/clip region always contains the circle.
+static void GrowToggleEffectBBox(const D2D1_POINT_2F& head, RECT& bbox, bool& hasBBox) {
+    float cursorSize = 32.0f;
+    if (cursor.bmWidth > 0 && cursor.bmHeight > 0) {
+        float w = cursor.bmWidth * cursor.dpiScaleX;
+        float h = cursor.bmHeight * cursor.dpiScaleY;
+        cursorSize = (w > h) ? w : h;
+    }
+    float maxRadius = cursorSize * kEffectDiameterFactor * 0.5f;
+    float margin = maxRadius + kEffectStrokeWidth + 1.0f;
+    GrowBBox(bbox, hasBBox,
+             (LONG)(head.x - margin), (LONG)(head.y - margin),
+             (LONG)(head.x + margin), (LONG)(head.y + margin));
+}
+
 VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime) {
     UNREFERENCED_PARAMETER(uMsg);
     UNREFERENCED_PARAMETER(idEvent);
@@ -2937,11 +2959,73 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
         RECT curBBox = { 0, 0, 0, 0 };
         bool hasCurBBox = false;
 
+        // Build the trail points and bounding box BEFORE drawing so the clear
+        // pass can be clipped to just the affected region instead of wiping the
+        // whole virtual-desktop backbuffer every frame.
+        std::vector<D2D1_POINT_2F> smoothed;
+        std::vector<HCURSOR> cursors;
+        std::vector<float> ratios;
+        if (render.pDCRenderTarget) {
+            BuildTrailPoints(pt, vX, vY, smoothed, cursors, ratios);
+            if (smoothed.size() >= 2) {
+                if (!settings.isGhost) {
+                    ChaikinSmooth(smoothed);
+                }
+                ComputeTrailBBox(smoothed, cursors, curBBox);
+                hasCurBBox = true;
+            }
+            if (effectActive && !smoothed.empty()) {
+                GrowToggleEffectBBox(smoothed[0], curBBox, hasCurBBox);
+            }
+        }
+
+        // The region to clear + redraw is the union of this frame's bbox and the
+        // previous frame's bbox (so the old trail is erased). Falls back to the
+        // full screen when there is no bounded region.
+        RECT clearRect = { 0, 0, vW, vH };
+        bool useClearRect = false;
+        if (hasCurBBox && runtime.hasPrevDirty) {
+            clearRect.left   = (curBBox.left   < runtime.prevDirtyRect.left)   ? curBBox.left   : runtime.prevDirtyRect.left;
+            clearRect.top    = (curBBox.top    < runtime.prevDirtyRect.top)    ? curBBox.top    : runtime.prevDirtyRect.top;
+            clearRect.right  = (curBBox.right  > runtime.prevDirtyRect.right)  ? curBBox.right  : runtime.prevDirtyRect.right;
+            clearRect.bottom = (curBBox.bottom > runtime.prevDirtyRect.bottom) ? curBBox.bottom : runtime.prevDirtyRect.bottom;
+            useClearRect = true;
+        } else if (hasCurBBox) {
+            clearRect = curBBox;
+            useClearRect = true;
+        } else if (runtime.hasPrevDirty) {
+            clearRect = runtime.prevDirtyRect;
+            useClearRect = true;
+        }
+        if (useClearRect) {
+            if (clearRect.left < 0) clearRect.left = 0;
+            if (clearRect.top < 0) clearRect.top = 0;
+            if (clearRect.right > vW) clearRect.right = vW;
+            if (clearRect.bottom > vH) clearRect.bottom = vH;
+            int clearW = clearRect.right - clearRect.left;
+            int clearH = clearRect.bottom - clearRect.top;
+            if (clearW > 768 || clearH > 768 || clearW <= 0 || clearH <= 0) {
+                useClearRect = false;
+            }
+        }
+        // A freshly (re)created backbuffer holds uninitialized pixels, so clear
+        // the whole thing once rather than relying on the clipped clear.
+        if (runtime.needsFullClear) {
+            useClearRect = false;
+            runtime.needsFullClear = false;
+        }
+
         if (render.pDCRenderTarget) {
             RECT rc = { 0, 0, vW, vH };
+            if (useClearRect) rc = clearRect;
             render.pDCRenderTarget->BindDC(render.hdcMem, &rc);
 
             render.pDCRenderTarget->BeginDraw();
+            // BindDC re-origins the target at the sub-rect's top-left, so undo
+            // that shift: drawing code still uses absolute backbuffer coords.
+            render.pDCRenderTarget->SetTransform(D2D1::Matrix3x2F::Translation(
+                useClearRect ? -(float)rc.left : 0.0f,
+                useClearRect ? -(float)rc.top : 0.0f));
             render.pDCRenderTarget->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
             render.pDCRenderTarget->SetAntialiasMode(settings.antialiasing
                 ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE
@@ -2955,20 +3039,6 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
                 EnsureCursorBitmap(cursor.cachedCursor, tw, th);
             }
 
-            std::vector<D2D1_POINT_2F> smoothed;
-            std::vector<HCURSOR> cursors;
-            std::vector<float> ratios;
-            BuildTrailPoints(pt, vX, vY, smoothed, cursors, ratios);
-
-            if (smoothed.size() >= 2) {
-                // Ghost stamps the decimated points directly so the copy count
-                // matches the configured size; the line style smooths corners.
-                if (!settings.isGhost) {
-                    ChaikinSmooth(smoothed);
-                }
-                ComputeTrailBBox(smoothed, cursors, curBBox);
-                hasCurBBox = true;
-            }
             RenderTrail(smoothed, cursors, ratios);
 
             RenderToggleEffect(smoothed, curBBox, hasCurBBox);
