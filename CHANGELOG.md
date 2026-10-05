@@ -1,6 +1,16 @@
 # Changelog
 
 ## 1.0
+- AI-review fixes:
+  - Added an idle state: after the trail has faded and the cursor has been still for 200 ms, the ~125 Hz render timer stops, `timeBeginPeriod(1)` is released, the overlay window is hidden, and the poll thread slows to a 20 ms interval. Movement, a hotkey, or a settings change resumes rendering and re-arms the timer and timer resolution.
+  - Removed the stray `timeBeginPeriod(1)`/`timeEndPeriod(1)` from the tool-mod launcher boilerplate (it ran in every `windhawk.exe` process and was only released in the launcher).
+  - Fixed a full-desktop backbuffer bitmap leak on every display-size change (`DeleteDC` before `DeleteObject`).
+  - Bound the Direct2D render target to the trail's dirty rect (with an origin-undo transform) instead of clearing/copying the whole virtual desktop every frame; primitives are drawn at absolute backbuffer coordinates.
+  - Reload settings on the overlay thread under `historyMutex` (previously `WhTool_ModSettingsChanged` rewrote the vectors while the render/poll threads were reading them) and clear the history on a settings change.
+  - Replaced the `TerminateThread`/timeout shutdown with an overlay-window-ready event and an unbounded join.
+  - Refresh cursor geometry when the per-monitor DPI changes; `IsGameRunning` now looks up `Progman`/`WorkerW` fresh instead of caching stale handles.
+  - Gave the overlay a unique window class (`CursorTrailOverlayClass`), credited Cursor Motion Blur / TheatriChris in the README, and added a "How it differs" section.
+  - Removed dead debug rendering code, reused a single `IWICImagingFactory`, and stopped holding `cursor.offsetMutex` while computing cursor geometry.
 - Development-tips compliance and cleanup:
   - Adopted `WindhawkUtils::StringSetting` (via `ReadStringSetting`) and `WindhawkUtils::SetFunctionHook` (helper mod) from `windhawk_utils.h`.
   - Removed the dead code left behind by the removed "Trail origin on cursor change" setting: the `TrailOriginMode` enum, the `Settings::trailOriginMode`/`trailOriginOnCursorChange` fields, `CursorState::frozenCursorOffset`, and the unreachable `none`/`immediate` branches in `PollThreadProc` and `BuildTrailPoints`.

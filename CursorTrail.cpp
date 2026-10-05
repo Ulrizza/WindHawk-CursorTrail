@@ -602,8 +602,6 @@ struct Settings {
     GhostReplaceMode ghostReplaceMode = GHOST_REPLACE_AUTO;  // which pixels to recolor
     Rgb   ghostReplaceColor = { 1.0f, 1.0f, 1.0f };   // Custom: original cursor color to swap for the tint
 
-    std::wstring    activeStyle = L"simple_line";
-
     std::vector<float> simpleLineWidths;              // parsed width values, one per stop
     std::vector<Rgb>   activeColorsRGB;               // pre-parsed colors of the active style
     int   colorBlendWidth = 0;
@@ -696,6 +694,7 @@ struct Runtime {
     std::mutex historyMutex;                  // protects history (poll + render threads)
     HANDLE pollThread = NULL;
     HANDLE pollStopEvent = NULL;
+    HANDLE overlayReadyEvent = NULL;          // signalled once the overlay window exists
     std::atomic<bool> isGameRunning{false};   // set by render thread, read by poll thread
     std::atomic<bool> cursorHidden{false};    // set by render thread, read by poll thread
     std::atomic<bool> renderScheduled{false}; // set by MMTimerCallback, cleared by overlay thread
@@ -707,7 +706,6 @@ struct Runtime {
     // when this differs from renderedRevision, so a static trail doesn't keep
     // repainting an identical frame. Read/written under historyMutex.
     std::atomic<unsigned long long> contentRevision{0};
-    int     sampleRate = 1;                   // polling interval in ms
     MMRESULT mmTimerId = 0;
     DWORD   lastActiveTime = 0;               // overlay-thread-only; last frame with work
     bool    periodRaised = false;             // overlay-thread-only; timeBeginPeriod(1) state
@@ -753,6 +751,7 @@ static const float kEffectStrokeWidth = 2.0f;
 static const int   kRenderIntervalMs  = 8;   // ~125 Hz render timer
 static const DWORD kIdleGraceMs       = 200; // inactivity before the render timer stops
 static const DWORD kIdlePollIntervalMs = 20; // poll interval while the overlay is idle
+static const DWORD kSampleIntervalMs  = 1;   // cursor poll interval while active
 
 ToggleEffect toggleEffect;
 
@@ -1086,13 +1085,9 @@ void LoadSettings() {
     settings.tailOffsetX = Wh_GetIntSetting(L"tail_offset.x");
     settings.tailOffsetY = Wh_GetIntSetting(L"tail_offset.y");
 
-    settings.activeStyle = ReadStringSetting(L"style", L"simple_line");
-
-    // RG-3: unknown style value → fallback to simple_line
-    if (settings.activeStyle != L"simple_line" && settings.activeStyle != L"cursor_ghost") {
-        settings.activeStyle = L"simple_line";
-    }
-    settings.isGhost = (settings.activeStyle == L"cursor_ghost");
+    // Unknown style values fall back to simple_line (isGhost stays false).
+    std::wstring style = ReadStringSetting(L"style", L"simple_line");
+    settings.isGhost = (style == L"cursor_ghost");
 
     if (settings.isGhost) {
         // Cursor ghost has its own trail options. sizeBased.tail_size is the
@@ -2241,20 +2236,21 @@ static void RequestOverlayWake() {
 }
 
 // High-frequency cursor polling thread.
-// Runs at runtime.sampleRate ms intervals (default 1 ms), pushes sampled positions
-// into runtime.history when the trail is active. All D2D operations remain on the
+// Runs at kSampleIntervalMs (1 ms) intervals while active, pushing sampled
+// positions into runtime.history. All D2D operations remain on the
 // overlay/render thread — this thread only touches runtime.history (under mutex),
 // GetCursorPos, and the atomic flags.
 DWORD WINAPI PollThreadProc(LPVOID) {
     // Match the overlay thread's DPI awareness so coordinate spaces agree.
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    // Wait on the stop event to drive the loop. Sampling runs at runtime.sampleRate
-    // (1 ms) while the overlay is active, and at a much slower kIdlePollIntervalMs
-    // while the overlay is idle so a stationary cursor doesn't keep waking the CPU.
+    // Wait on the stop event to drive the loop. Sampling runs at
+    // kSampleIntervalMs (1 ms) while the overlay is active, and at a much slower
+    // kIdlePollIntervalMs while the overlay is idle so a stationary cursor
+    // doesn't keep waking the CPU.
     for (;;) {
         DWORD waitMs = runtime.overlayIdle.load() ? kIdlePollIntervalMs
-                                                  : (DWORD)runtime.sampleRate;
+                                                  : kSampleIntervalMs;
         if (WaitForSingleObject(runtime.pollStopEvent, waitMs) != WAIT_TIMEOUT) {
             break;
         }
@@ -2702,7 +2698,7 @@ static void RenderTrail(const std::vector<D2D1_POINT_2F>& smoothed,
             RenderSimpleLineStyle(smoothed);
         }
         // Future styles: add else-if branches here, e.g.
-        // else if (settings.activeStyle == L"glow") { RenderGlowStyle(smoothed); }
+        // else if (style == L"glow") { RenderGlowStyle(smoothed); }
     }
     // A trail frame replaces the previous one and the dirty-rect blit erases
     // any leftovers, so no separate clear pass is queued. needsClear is only
@@ -3143,6 +3139,12 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         {
             std::lock_guard<std::mutex> lock(runtime.historyMutex);
             LoadSettings();
+            // Samples captured under the old style were offset differently
+            // (e.g. the line origin vs. the ghost hotspot), so drop them and
+            // start the trail fresh rather than briefly misplacing the copies.
+            runtime.history.clear();
+            runtime.lastSampleValid = false;
+            MarkContentChanged();
         }
         return 0;
     }
@@ -3207,6 +3209,13 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
         screenX, screenY, screenW, screenH,
         NULL, NULL, hInstance, NULL
     );
+
+    // The window (and its message queue) now exist, or creation failed and we
+    // are about to return. Signal either way so WhTool_ModUninit's wait for the
+    // window can't block forever on the failed path.
+    if (runtime.overlayReadyEvent) {
+        SetEvent(runtime.overlayReadyEvent);
+    }
 
     if (!runtime.overlayHwnd) return 0;
 
@@ -3285,6 +3294,9 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
 
 BOOL WhTool_ModInit() {
     LoadSettings();
+    // Created before the thread so WhTool_ModUninit can wait for the overlay
+    // window to exist even if the mod is disabled immediately after starting.
+    runtime.overlayReadyEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
     runtime.threadHandle = CreateThread(NULL, 0, OverlayThreadProc, NULL, 0, &runtime.overlayThreadId);
     return TRUE;
 }
@@ -3295,6 +3307,14 @@ void WhTool_ModUninit() {
     // thread begins shutting down before the overlay window's WM_QUIT is posted.
     if (runtime.pollStopEvent) {
         SetEvent(runtime.pollStopEvent);
+    }
+
+    // Wait until the overlay thread has created (or failed to create) its
+    // window. Without this, disabling right after startup could find
+    // runtime.overlayHwnd still NULL, post no WM_QUIT, and then block the join
+    // below forever.
+    if (runtime.threadHandle && runtime.overlayReadyEvent) {
+        WaitForSingleObject(runtime.overlayReadyEvent, INFINITE);
     }
 
     // Post WM_QUIT to the overlay window so its message loop exits and runs the
@@ -3308,6 +3328,10 @@ void WhTool_ModUninit() {
         WaitForSingleObject(runtime.threadHandle, INFINITE);
         CloseHandle(runtime.threadHandle);
         runtime.threadHandle = NULL;
+    }
+    if (runtime.overlayReadyEvent) {
+        CloseHandle(runtime.overlayReadyEvent);
+        runtime.overlayReadyEvent = NULL;
     }
 }
 

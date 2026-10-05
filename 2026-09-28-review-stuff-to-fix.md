@@ -28,7 +28,7 @@ Line numbers refer to `mods/cursor-trail.wh.cpp` in the fork.
 
 ## Functionality notes (non-critical ideas)
 
-- [ ] 13. Render only trail bbox, not the whole virtual desktop
-- [ ] 14. Hide overlay window when idle
-- [ ] 15. Refresh cursor geometry on per-monitor DPI change
-- [ ] 16. `IsGameRunning` stale `Progman`/`WorkerW` handle cache
+- [x] 13. Render only trail bbox, not the whole virtual desktop
+- [x] 14. Hide overlay window when idle
+- [x] 15. Refresh cursor geometry on per-monitor DPI change
+- [x] 16. `IsGameRunning` stale `Progman`/`WorkerW` handle cache
