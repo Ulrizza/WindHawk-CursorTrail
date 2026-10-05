@@ -635,6 +635,7 @@ struct CursorState {
 
     int   bmWidth = 0, bmHeight = 0;        // bitmap dims + DPI scale (toggle effect + ghost bitmaps)
     float dpiScaleX = 1.0f, dpiScaleY = 1.0f;
+    UINT  lastDpiX = 96, lastDpiY = 96;     // effective DPI the current geometry was built for
 
     std::unordered_map<HCURSOR, CursorGeom> geomCache;  // render-thread-only per-cursor geometry
 };
@@ -1191,6 +1192,20 @@ static DWORD ReadRegDword(HKEY root, const wchar_t* subKey, const wchar_t* value
     return data;
 }
 
+// Returns the effective per-monitor DPI of the monitor under the pointer
+// (default 96 when it can't be determined). Used both to size the cursor and to
+// detect when the geometry cache must be rebuilt after a DPI change.
+static void GetCursorDpi(UINT& dpiX, UINT& dpiY) {
+    dpiX = 96; dpiY = 96;
+    POINT pt;
+    if (GetCursorPos(&pt)) {
+        HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        if (hMon) {
+            GetDpiForMonitor(hMon, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
+        }
+    }
+}
+
 // Returns the true on-screen size (physical pixels) of the cursor on the monitor
 // under the pointer. The Windows cursor-size setting is stored in the registry
 // as a DPI-independent base size (HKCU\Control Panel\Cursors\CursorBaseSize,
@@ -1199,13 +1214,7 @@ static DWORD ReadRegDword(HKEY root, const wchar_t* subKey, const wchar_t* value
 // as a fallback.
 static void GetActualCursorSize(int& cx, int& cy) {
     UINT dpiX = 96, dpiY = 96;
-    POINT pt;
-    if (GetCursorPos(&pt)) {
-        HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-        if (hMon) {
-            GetDpiForMonitor(hMon, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
-        }
-    }
+    GetCursorDpi(dpiX, dpiY);
 
     bool found = false;
     DWORD base = ReadRegDword(HKEY_CURRENT_USER, L"Control Panel\\Cursors",
@@ -1364,10 +1373,14 @@ void UpdateCursorCenterOffset() {
     }
     runtime.cursorHidden.store(false);
 
+    UINT dpiX = 96, dpiY = 96;
+    GetCursorDpi(dpiX, dpiY);
+
     {
         std::lock_guard<std::mutex> lock(cursor.offsetMutex);
-        if (ci.hCursor == cursor.cachedCursor) {
-            return;  // same cursor as last frame, reuse cached geometry
+        if (ci.hCursor == cursor.cachedCursor &&
+            dpiX == cursor.lastDpiX && dpiY == cursor.lastDpiY) {
+            return;  // same cursor and DPI, reuse cached geometry
         }
     }
 
@@ -1392,6 +1405,8 @@ void UpdateCursorCenterOffset() {
     cursor.bmHeight = g.bmHeight;
     cursor.dpiScaleX = g.dpiScaleX;
     cursor.dpiScaleY = g.dpiScaleY;
+    cursor.lastDpiX = dpiX;
+    cursor.lastDpiY = dpiY;
 
     cursor.cachedCursor = ci.hCursor;
 }
