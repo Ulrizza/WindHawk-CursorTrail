@@ -1814,11 +1814,13 @@ bool IsGameRunning() {
         return false;
     }
 
-    // Cache the desktop worker handles so we don't spam the Windows string table search literally 60 times a second
-    static HWND s_hwndProgman = FindWindowW(L"Progman", NULL);
-    static HWND s_hwndWorkerW = FindWindowW(L"WorkerW", NULL);
-    
-    if (hwnd == s_hwndProgman || hwnd == s_hwndWorkerW) {
+    // Look up the desktop handles fresh each call (this runs at most once per
+    // 500 ms) instead of caching them, so they don't go stale when Explorer
+    // restarts and recreates the Progman/WorkerW windows.
+    HWND hwndProgman = FindWindowW(L"Progman", NULL);
+    HWND hwndWorkerW = FindWindowW(L"WorkerW", NULL);
+
+    if (hwnd == hwndProgman || hwnd == hwndWorkerW) {
         return false;
     }
 
