@@ -17,24 +17,18 @@ I cannot promise you anything because I don't have much free time but I enjoyed 
 2. Install **Simple Cursor Trail** from the Windhawk mods catalog, or import the
    source (`CursorTrail.cpp`) from this repository via the Windhawk mod editor.
 
-## The two styles
+## Styles
+
+This mod is intentionally minimal: it just draws a trail — no particles,
+physics, or extra effects.
 
 - **Simple line**: a polyline that follows the cursor; its width, color, and
   opacity can change from head to tail.
 - **Cursor ghost**: faded copies of the cursor image, each latched at the spot
-  where it spawned (they stay put and only fade out). Each copy keeps the exact
-  cursor image from when it was sampled, so an image change (e.g. arrow to
-  I-beam) appears gradually along the trail.
-
-## How it differs
-
-This mod is intentionally minimal: it just draws a trail — no particles,
-physics, or extra effects. It offers two styles:
-
-- **Simple line** — a line that follows the cursor, with customizable width,
-  color, and opacity.
-- **Cursor ghost** — faded copies of the real cursor image, left behind where
-  they spawned; directly inspired by the classic Windows cursor-trail feature.
+  where it spawned (they stay put and only fade out); directly inspired by the
+  classic Windows cursor-trail feature. Each copy keeps the exact cursor image
+  from when it was sampled, so an image change (e.g. arrow to I-beam) appears
+  gradually along the trail.
 
 By contrast, [Mouse Trail](https://windhawk.net/mods/mouse-trail) follows the
 cursor with special effects from a full D3D11 particle/physics engine, while
