@@ -76,7 +76,7 @@ Applies when Trail mode is Time based.
 
 ##### Tail duration
 
-How long each trail segment stays visible, in milliseconds. Minimum 20.
+How long each trail segment stays visible, in milliseconds. Minimum 20, maximum 10000.
 
 `100`  
 ![simpleLineOptions.timeBased.tail_duration = 100](./images/simpleLineOptions.timeBased.tail_duration.100.gif)
@@ -93,7 +93,7 @@ Applies when Trail mode is Size based.
 
 ##### Tail length
 
-Maximum trail length in pixels. Minimum 20.
+Maximum trail length in pixels. Minimum 20, maximum 10000.
 
 `100`  
 ![simpleLineOptions.sizeBased.tail_size = 100](./images/simpleLineOptions.sizeBased.tail_size.100.gif)
@@ -208,7 +208,7 @@ Applies when Trail mode is Time based.
 
 ##### Tail duration
 
-How long each cursor copy stays visible, in milliseconds. Minimum 20.
+How long each cursor copy stays visible, in milliseconds. Minimum 20, maximum 10000.
 
 `100`  
 ![ghostOptions.timeBased.tail_duration = 100](./images/ghostOptions.timeBased.tail_duration.100.gif)
@@ -365,7 +365,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 ### Threads
 
 - **Overlay thread** (`OverlayThreadProc`) — creates the `WS_EX_LAYERED` topmost window, runs the message loop, and does all Direct2D rendering via `SmearTimerProc`.
-- **Poll thread** (`PollThreadProc`) — samples the cursor every 1 ms while the overlay is active (20 ms while idle, 250 ms while the trail is off via hotkey) and pushes decimated samples into `runtime.history`; it also runs the fullscreen-game check every 500 ms and wakes the overlay on a change.
+- **Poll thread** (`PollThreadProc`) — samples the cursor every 1 ms while the overlay is active (20 ms while idle, 250 ms while the trail is off via hotkey, 1000 ms while a fullscreen game is detected) and pushes decimated samples into `runtime.history`; it also runs the fullscreen-game check (every 500 ms, or once per wake — about 1 s — while a game is detected) and wakes the overlay on a change.
 - **Multimedia timer** (`MMTimerCallback`, a system thread) — posts `WM_TIMER` at ~125 Hz to wake the overlay thread. It never touches Direct2D directly.
 
 ### Locking model

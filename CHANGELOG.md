@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2
+- 2026-10-09 AI-review fixes (all optional):
+  - Removed the redundant line-style redraw on a cursor-image change; the line head already realigns through the origin glide, so the redraw produced an identical frame. Dropped the now-unused `runtime.lastSampledCursor` field.
+  - While a fullscreen game is detected, the poll thread now waits 1 s (was 20 ms) and re-checks the game once per wake; game entry/exit is still noticed.
+  - Bounded the trail-length settings: `tail_duration` and the line `tail_size` are now clamped to `[20, 10000]` (documented in their descriptions). `BuildTrailPoints` reserves by the actual history size (capped by the budget) instead of the full budget each frame.
+
 ## 1.1
 - 2026-10-08 AI-review fixes:
   - Keep a static trail visible while the render timer is stopped: the overlay is hidden only when the last frame drew nothing.
