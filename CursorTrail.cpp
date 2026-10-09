@@ -2,7 +2,7 @@
 // @id              cursor-trail
 // @name            Simple Cursor Trail
 // @description     A fully customizable cursor trail overlay for the Windows desktop.
-// @version         1.0
+// @version         1.1
 // @author          Ulrizza
 // @github          https://github.com/Ulrizza
 // @license         MIT

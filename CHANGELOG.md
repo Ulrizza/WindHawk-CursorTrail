@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1
+- 2026-10-08 AI-review fixes:
+  - Keep a static trail visible while the render timer is stopped: the overlay is hidden only when the last frame drew nothing.
+  - Moved the fullscreen-game detection to the poll thread (every 500 ms, waking the overlay on a change) so the overlay can go idle during games; the render thread no longer checks each frame.
+  - The poll thread now polls at 250 ms while the trail is off via the hotkey.
+  - Clear the trail immediately when the pointer is hidden (e.g. Windows' hide-while-typing) instead of fading it over the tail duration.
+  - Dropped the stale `runtime.cursorHidden` atomic and read the sampled cursor state instead.
+  - Removed the redundant `SetThreadDpiAwarenessContext` calls and renamed the leftover overlay window title from `SmearOverlay` to `CursorTrailOverlay`.
+  - README: merged "How it differs" into "Styles" and updated the architecture notes.
+
 ## 1.0
 - AI-review fixes:
   - Added an idle state: after the trail has faded and the cursor has been still for 200 ms, the ~125 Hz render timer stops, `timeBeginPeriod(1)` is released, the overlay window is hidden, and the poll thread slows to a 20 ms interval. Movement, a hotkey, or a settings change resumes rendering and re-arms the timer and timer resolution.
