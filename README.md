@@ -365,7 +365,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 ### Threads
 
 - **Overlay thread** (`OverlayThreadProc`) — creates the `WS_EX_LAYERED` topmost window, runs the message loop, and does all Direct2D rendering via `SmearTimerProc`.
-- **Poll thread** (`PollThreadProc`) — samples the cursor every 1 ms and pushes decimated samples into `runtime.history`.
+- **Poll thread** (`PollThreadProc`) — samples the cursor every 1 ms while the overlay is active (20 ms while idle, 250 ms while the trail is off via hotkey) and pushes decimated samples into `runtime.history`; it also runs the fullscreen-game check every 500 ms and wakes the overlay on a change.
 - **Multimedia timer** (`MMTimerCallback`, a system thread) — posts `WM_TIMER` at ~125 Hz to wake the overlay thread. It never touches Direct2D directly.
 
 ### Locking model
@@ -373,7 +373,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 - `runtime.historyMutex` protects `runtime.history` (poll + render threads) and serializes `LoadSettings()` (run on the overlay thread) against the poll thread's settings reads.
 - `cursor.offsetMutex` protects `cursor.visualOffset` (written by render thread, read by poll thread).
 - Lock order is always `runtime.historyMutex` → `cursor.offsetMutex`.
-- `runtime.isGameRunning`, `runtime.cursorHidden`, `runtime.renderScheduled`, and `runtime.trailEnabled` are atomics.
+- `runtime.isGameRunning`, `runtime.renderScheduled`, `runtime.trailEnabled`, `runtime.overlayIdle`, and `runtime.idleWakePending` are atomics.
 - `origin.*`, `render.*`, and the cursor dimensions are single-thread owned (see table above).
 
 ### Render pipeline
