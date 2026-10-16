@@ -2,7 +2,7 @@
 // @id              cursor-trail
 // @name            Simple Cursor Trail
 // @description     A fully customizable cursor trail overlay for the Windows desktop.
-// @version         1.2
+// @version         1.4
 // @author          Ulrizza
 // @github          https://github.com/Ulrizza
 // @license         MIT
@@ -30,6 +30,12 @@ I cannot promise you anything because I don't have much free time but I enjoyed 
 1. Install [Windhawk](https://windhawk.net/).
 2. Install **Simple Cursor Trail** from the Windhawk mods catalog, or import the
    source (`CursorTrail.cpp`) from this repository via the Windhawk mod editor.
+
+## Always on top
+
+On Windows 11 the trail is drawn behind the taskbar and Start menu. Install the
+companion **Simple Cursor Trail helper - always on top** mod to lift the overlay
+into the system-tools Z-order band so it draws above them.
 
 ## Styles
 

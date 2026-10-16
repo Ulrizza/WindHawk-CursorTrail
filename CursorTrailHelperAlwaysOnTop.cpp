@@ -1,8 +1,8 @@
 // ==WindhawkMod==
 // @id              cursor-trail-helper-always-on-top
-// @name            Cursor trail helper - always on top
-// @description     Places the Cursor trail overlay above the taskbar and Start menu by moving it to a higher Z-order band
-// @version         1.0
+// @name            Simple Cursor Trail helper - always on top
+// @description     Places the Simple Cursor Trail overlay above the taskbar and Start menu by moving it to a higher Z-order band
+// @version         1.2
 // @author          Ulrizza
 // @github          https://github.com/Ulrizza
 // @license         MIT
@@ -11,18 +11,18 @@
 
 // ==WindhawkModReadme==
 /*
-# Cursor trail helper - always on top
+# Simple Cursor Trail helper - always on top
 
-Companion mod for **Cursor trail**. It exists only to solve a Windows
+Companion mod for **Simple Cursor Trail**. It exists only to solve a Windows
 limitation: starting with Windows 8, windows live in fixed Z-order *bands*
 (`ZBID`), and a window in a lower band can never be drawn above a window in a
 higher band, no matter how `SetWindowPos`/`WS_EX_TOPMOST` is used.
 
-The `Cursor trail` overlay is a normal desktop-band window, while the Windows 11
-taskbar sits in `ZBID_IMMERSIVE_MOGO` (6) and the Start menu and notification
-center in other immersive bands above the desktop band. This mod moves the
-overlay into `ZBID_SYSTEM_TOOLS` (16), the same band Task Manager uses for
-"Always on top", which is above all of them.
+The `Simple Cursor Trail` overlay is a normal desktop-band window, while the
+Windows 11 taskbar sits in `ZBID_IMMERSIVE_MOGO` (6) and the Start menu and
+notification center in other immersive bands above the desktop band. This mod
+moves the overlay into `ZBID_SYSTEM_TOOLS` (16), the same band Task Manager uses
+for "Always on top", which is above all of them.
 
 ## How it works
 
@@ -44,7 +44,17 @@ reset.
 - Uses undocumented Windows APIs (`SetWindowBand`, `NtUserEnableIAMAccess`).
 - Places the trail above the taskbar, Start menu, Task Manager and Alt-Tab.
   The overlay is click-through, so it never steals input.
-- Requires the **Cursor trail** mod to be installed and enabled.
+- Requires the **Simple Cursor Trail** mod
+  ([catalog](https://windhawk.net/mods/cursor-trail)) to be installed and
+  enabled.
+
+## Licence
+
+This project is licensed under the MIT License. You're free to use, modify, and
+redistribute the code as long as you keep the original copyright notice and
+credit the author (Ulrizza). See
+[LICENSE](https://github.com/Ulrizza/WindHawk-CursorTrail/blob/main/LICENSE) for
+the full text.
 */
 // ==/WindhawkModReadme==
 
@@ -56,7 +66,6 @@ reset.
 // --- Z-order bands (ZBID) -------------------------------------------------
 enum ZBID {
     ZBID_DESKTOP = 1,
-    ZBID_IMMERSIVE_MOGO = 6,
     ZBID_SYSTEM_TOOLS = 16,
 };
 
@@ -71,7 +80,7 @@ static NtUserEnableIAMAccess_t pNtUserEnableIAMAccess;
 static NtUserEnableIAMAccess_t pNtUserEnableIAMAccessOriginal;
 
 // --- State ----------------------------------------------------------------
-// Must match the overlay window class created by the main Cursor trail mod.
+// Must match the overlay window class created by the main Simple Cursor Trail mod.
 static const wchar_t* kOverlayClass = L"CursorTrailOverlayClass";
 static const DWORD kTargetBand = ZBID_SYSTEM_TOOLS;
 
@@ -79,8 +88,13 @@ static std::atomic<ULONG64> g_iamKey{0};
 static HANDLE g_stopEvent;
 static HANDLE g_workerThread;
 static HWND g_lastBanded;
-static bool g_hookInstalled;
+static std::atomic<bool> g_hookInstalled{false};
 static std::atomic<bool> g_unhookPending{false};
+
+// Poll quickly while looking for the overlay or applying the band, then back
+// off to a slow interval once the band is confirmed, to keep wakeups low.
+static const DWORD kActivePollMs = 1000;
+static const DWORD kStablePollMs = 5000;
 
 // Captures the IAM access key when the shell calls NtUserEnableIAMAccess.
 // The hook is removed by the worker thread (not from here) once captured.
@@ -94,6 +108,28 @@ static BOOL WINAPI NtUserEnableIAMAccessHook(ULONG64 key, BOOL enable) {
     return result;
 }
 
+// Installs the IAM access key hook if it isn't already installed. Called once
+// at load, and again if a captured key turns out to be stale.
+static void ArmIamHook(bool applyOperations) {
+    if (g_hookInstalled.load() || !pNtUserEnableIAMAccess) {
+        return;
+    }
+
+    if (WindhawkUtils::SetFunctionHook(pNtUserEnableIAMAccess,
+                                       NtUserEnableIAMAccessHook,
+                                       &pNtUserEnableIAMAccessOriginal)) {
+        g_hookInstalled.store(true);
+        if (applyOperations) {
+            // Hooks added at load are applied implicitly after Wh_ModInit;
+            // a re-arm at runtime has to apply them itself.
+            Wh_ApplyHookOperations();
+        }
+        Wh_Log(L"NtUserEnableIAMAccess hooked");
+    } else {
+        Wh_Log(L"Failed to hook NtUserEnableIAMAccess");
+    }
+}
+
 static bool ApplyBand(HWND hwnd) {
     ULONG64 iamKey = g_iamKey.load();
     if (iamKey) {
@@ -103,6 +139,10 @@ static bool ApplyBand(HWND hwnd) {
         pNtUserEnableIAMAccess(iamKey, FALSE);
         if (!ok) {
             Wh_Log(L"SetWindowBand (key) failed: %u", err);
+            // The key may have gone stale; drop it and re-arm the hook so a
+            // fresh key can be captured if the shell enables IAM access again.
+            g_iamKey.store(0);
+            ArmIamHook(true);
         }
         return ok != FALSE;
     }
@@ -121,15 +161,16 @@ static bool ApplyBand(HWND hwnd) {
 }
 
 static DWORD WINAPI BandWorkerThread(LPVOID) {
+    DWORD waitMs = kActivePollMs;
     for (;;) {
-        if (WaitForSingleObject(g_stopEvent, 1000) != WAIT_TIMEOUT) {
+        if (WaitForSingleObject(g_stopEvent, waitMs) != WAIT_TIMEOUT) {
             break;
         }
 
-        if (g_unhookPending.load() && g_hookInstalled && pNtUserEnableIAMAccess) {
+        if (g_unhookPending.load() && g_hookInstalled.load() && pNtUserEnableIAMAccess) {
             Wh_RemoveFunctionHook((void*)pNtUserEnableIAMAccess);
             Wh_ApplyHookOperations();
-            g_hookInstalled = false;
+            g_hookInstalled.store(false);
             g_unhookPending.store(false);
             Wh_Log(L"NtUserEnableIAMAccess unhooked");
         }
@@ -137,6 +178,7 @@ static DWORD WINAPI BandWorkerThread(LPVOID) {
         HWND hwnd = FindWindowW(kOverlayClass, nullptr);
         if (!hwnd) {
             g_lastBanded = nullptr;
+            waitMs = kActivePollMs;
             continue;
         }
 
@@ -144,15 +186,20 @@ static DWORD WINAPI BandWorkerThread(LPVOID) {
         if (pGetWindowBand && pGetWindowBand(hwnd, &band)) {
             if (band == kTargetBand) {
                 g_lastBanded = hwnd;
+                waitMs = kStablePollMs;
                 continue;
             }
         } else if (hwnd == g_lastBanded) {
+            waitMs = kStablePollMs;
             continue;
         }
 
         if (ApplyBand(hwnd)) {
             g_lastBanded = hwnd;
+            waitMs = kStablePollMs;
             Wh_Log(L"Overlay moved to band %u", kTargetBand);
+        } else {
+            waitMs = kActivePollMs;
         }
     }
     return 0;
@@ -182,16 +229,7 @@ BOOL Wh_ModInit() {
         return FALSE;
     }
 
-    if (pNtUserEnableIAMAccess) {
-        if (WindhawkUtils::SetFunctionHook(pNtUserEnableIAMAccess,
-                                           NtUserEnableIAMAccessHook,
-                                           &pNtUserEnableIAMAccessOriginal)) {
-            g_hookInstalled = true;
-            Wh_Log(L"NtUserEnableIAMAccess hooked");
-        } else {
-            Wh_Log(L"Failed to hook NtUserEnableIAMAccess");
-        }
-    }
+    ArmIamHook(false);
 
     g_stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!g_stopEvent) {
@@ -215,7 +253,7 @@ void Wh_ModUninit() {
         SetEvent(g_stopEvent);
     }
     if (g_workerThread) {
-        WaitForSingleObject(g_workerThread, 2000);
+        WaitForSingleObject(g_workerThread, INFINITE);
         CloseHandle(g_workerThread);
         g_workerThread = nullptr;
     }
