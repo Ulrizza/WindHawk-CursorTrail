@@ -4,45 +4,10 @@
 - Renamed the companion mod to **Simple Cursor Trail helper - always on top**, to
   match this mod's name.
 
-## Simple Cursor Trail helper - always on top 1.3
-- Kept the `NtUserEnableIAMAccess` hook installed for the mod's whole lifetime
-  instead of adding/removing it at runtime, so no `Wh_ApplyHookOperations` call
-  can run after Windhawk has removed the mod's hooks (first AI-review fix). The
-  hook now records the latest key, which also self-heals a stale one; the README
-  step describing the hook was updated to match.
-- Added before/after visuals to the description
-  (`images/AlwaysOnTopBefore.gif`, `images/AlwaysOnTopAfter.gif`).
-- Only raise the overlay after verifying it is click-through and owned by
-  `windhawk.exe` (`windhawk-mod.exe` on Windhawk 2.0), so an unrelated window
-  with the same class name or a sandboxed window is never lifted above the shell.
-- Skip the worker in `explorer.exe` instances that don't host `Shell_TrayWnd`
-  (e.g. separate-process folder windows).
-- Only hook `NtUserEnableIAMAccess` after verifying that user32's ordinal 2510
-  forwards to `win32u.dll`'s named export; otherwise the IAM hook is disabled so
-  a changed ordinal can never make the mod hook an unrelated function.
-
-## Simple Cursor Trail helper - always on top 1.2
-- Renamed the mod from **Cursor trail helper - always on top** to **Simple Cursor
-  Trail helper - always on top**, to match the main mod's name.
-- Clarified the description's opening with a plain-language summary of what the
-  mod does, before the Z-order-band explanation.
-
 ## 1.3
 - Re-added the companion-mod reference now that the helper ships: the README and
   description point users to the helper (without it, Windows 11 draws the trail
   behind the taskbar and Start menu).
-
-## Simple Cursor Trail helper - always on top 1.1
-- The worker poll now backs off to a 5 s interval once the band is confirmed
-  (1 s while hunting), instead of waking every second for the whole session.
-- `Wh_ModUninit` joins the worker with `INFINITE`, so the stop event and thread
-  handles are never closed while the worker can still be running.
-- If a captured IAM access key fails, it is dropped and the
-  `NtUserEnableIAMAccess` hook is re-armed so a fresh key can be captured.
-- `g_hookInstalled` is now atomic and the unused `ZBID_IMMERSIVE_MOGO` enum
-  value was removed.
-- Added a `## Licence` section and a link to the Simple Cursor Trail mod to the
-  description.
 
 ## 1.2
 - 2026-10-09 AI-review fixes (all optional):
@@ -74,10 +39,6 @@
 - Development-tips compliance and cleanup:
   - Adopted `WindhawkUtils::StringSetting` (via `ReadStringSetting`) and `WindhawkUtils::SetFunctionHook` (helper mod) from `windhawk_utils.h`.
   - Removed the dead code left behind by the removed "Trail origin on cursor change" setting: the `TrailOriginMode` enum, the `Settings::trailOriginMode`/`trailOriginOnCursorChange` fields, `CursorState::frozenCursorOffset`, and the unreachable `none`/`immediate` branches in `PollThreadProc` and `BuildTrailPoints`.
-- Simple Cursor Trail helper - always on top fixes:
-  - Made the cross-thread `g_iamKey`/`g_unhookPending` state `std::atomic` (was `volatile`).
-  - The runtime unhook now calls `Wh_ApplyHookOperations()` so it actually takes effect.
-  - Removed the redundant, out-of-window `Wh_RemoveFunctionHook` call from `Wh_ModUninit`.
 
 ## 0.19
 - Public-release prep:
@@ -118,9 +79,6 @@
 - Added a Replace subgroup (`ghostOptions.color.replace`) with a `mode` selector and a `custom` color. `auto` (default) recolors the cursor's enclosed center color, ignoring the outline/contour (`AnalyzeCursorColors`; falls back to the largest region when nothing is enclosed); `custom` recolors the `custom` color (default `FFFFFF`; set `000000` to recolor a black cursor body); `whole` recolors every non-transparent pixel.
 - Recoloring splits each pixel between the replace color and a keep color (the largest boundary/outline region, or the region farthest from the replace color) with a soft midpoint band, so anti-aliased edges no longer leave a halo of the original color.
 - Colors are parsed via the shared `LoadColorSettings(prefix, defaultColor)` helper into `settings.activeColorsRGB` (empty means "no color" when `defaultColor` is null), and `EnsureCursorBitmap` bakes the sampled gradient into per-cursor bitmap variants selected by `GetCursorBitmap(hCursor, ratio)`.
-
-## Simple Cursor Trail helper - always on top 1.0
-- Added the **Simple Cursor Trail helper - always on top** companion mod (`CursorTrailHelperAlwaysOnTop.cpp`, mod id `cursor-trail-helper-always-on-top`). It runs inside `explorer.exe` and moves the overlay into `ZBID_SYSTEM_TOOLS` via the undocumented `SetWindowBand` API, so the trail draws above the Windows 11 taskbar and Start menu. When direct banding is denied it captures the IAM access key by hooking `NtUserEnableIAMAccess` (unhooked once captured), and re-applies the band if it is reset or the overlay is recreated.
 
 ## 0.14
 - Fixed Cursor ghost copies sliding along with the cursor. Copies are now latched at the screen position where they are spawned (a new copy is stamped once the cursor travels the configured spacing) and only fade/expire in place.
