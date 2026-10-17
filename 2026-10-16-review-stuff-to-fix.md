@@ -35,15 +35,15 @@ change undone on unload.
 
 - [x] 2. Add a visual to the README: added before/after GIFs (`images/AlwaysOnTopBefore.gif` and `images/AlwaysOnTopAfter.gif`) to the description, referenced by their absolute raw URLs.
 - [x] 3. README step 3 doesn't match the code (line 37): it said the hook is installed only "if that is denied", but `Wh_ModInit` always installs it. Reworded to say the hook is always installed and records the key the shell uses.
-- [ ] 4. Check that the window found is really the trail overlay before raising it (lines 181–200) — today any top-level window with the class `CursorTrailOverlayClass` is raised into `ZBID_SYSTEM_TOOLS`, including an unrelated app using the same generic class name or a sandboxed window. Two cheap checks:
+- [x] 4. Check that the window found is really the trail overlay before raising it (lines 181–200) — today any top-level window with the class `CursorTrailOverlayClass` is raised into `ZBID_SYSTEM_TOOLS`, including an unrelated app using the same generic class name or a sandboxed window. Implemented in `IsTrailOverlay`. Two cheap checks:
   - Only raise click-through windows: `GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TRANSPARENT`.
   - Check the owning process with `GetWindowThreadProcessId` + `QueryFullProcessImageNameW`. Simple Cursor Trail runs in `windhawk.exe`, which becomes `windhawk-mod.exe` in Windhawk 2.0.
 
 ## Functionality notes (non-critical)
 
 - [x] 5. The key is dropped on every `SetWindowBand` failure (lines 143–148). Superseded by fix #1: the key is no longer dropped at all, and the always-installed hook overwrites it with the latest key.
-- [ ] 6. `NtUserEnableIAMAccess` is resolved by the hard-coded ordinal 2510 (line 221) with no verification. On a build where that ordinal is a different export, the mod hooks an unrelated function and calls it with `(key, TRUE/FALSE)` inside Explorer. Consider verifying the address (e.g. compare it against `win32u.dll`'s `NtUserEnableIAMAccess` named export on builds that have it).
-- [ ] 7. Every `explorer.exe` process runs the loop (lines 166–209). When folder windows run in a separate process, those instances also get the mod, never capture the shell's key, their direct `SetWindowBand` calls fail, and they keep polling every second. Skip the work in any process that doesn't own `Shell_TrayWnd` (compare `GetWindowThreadProcessId(FindWindowW(L"Shell_TrayWnd", nullptr), &pid)` with `GetCurrentProcessId()`).
+- [x] 6. `NtUserEnableIAMAccess` is resolved by the hard-coded ordinal 2510 (line 221) with no verification. Implemented: `ResolveApis` now resolves win32u's named `NtUserEnableIAMAccess` and only hooks the ordinal after confirming it is the same address or a thunk that calls it (`ThunkCallsTarget`, a guarded IAT-slot check). If not verified (or win32u is missing), the IAM hook is disabled; the direct `SetWindowBand` path still runs.
+- [x] 7. Every `explorer.exe` process runs the loop (lines 166–209). When folder windows run in a separate process, those instances also get the mod, never capture the shell's key, their direct `SetWindowBand` calls fail, and they keep polling every second. Implemented in `IsShellProcess`: the worker exits immediately in `explorer.exe` instances that don't own `Shell_TrayWnd` (if the taskbar doesn't exist yet, it proceeds so early shell startup still works).
 
 ## No action
 

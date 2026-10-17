@@ -16,6 +16,14 @@
   step describing the hook was updated to match.
 - Added before/after visuals to the description
   (`images/AlwaysOnTopBefore.gif`, `images/AlwaysOnTopAfter.gif`).
+- Only raise the overlay after verifying it is click-through and owned by
+  `windhawk.exe` (`windhawk-mod.exe` on Windhawk 2.0), so an unrelated window
+  with the same class name or a sandboxed window is never lifted above the shell.
+- Skip the worker in `explorer.exe` instances that don't host `Shell_TrayWnd`
+  (e.g. separate-process folder windows).
+- Only hook `NtUserEnableIAMAccess` after verifying that user32's ordinal 2510
+  forwards to `win32u.dll`'s named export; otherwise the IAM hook is disabled so
+  a changed ordinal can never make the mod hook an unrelated function.
 
 ## 1.3
 - Re-added the companion-mod reference now that the helper ships: the README and
