@@ -33,7 +33,7 @@ change undone on unload.
 
 ## Optional improvements
 
-- [ ] 2. Add a visual to the README: a short GIF or screenshot of the trail drawn over the taskbar or an open Start menu.
+- [x] 2. Add a visual to the README: added before/after GIFs (`images/AlwaysOnTopBefore.gif` and `images/AlwaysOnTopAfter.gif`) to the description, referenced by their absolute raw URLs.
 - [x] 3. README step 3 doesn't match the code (line 37): it said the hook is installed only "if that is denied", but `Wh_ModInit` always installs it. Reworded to say the hook is always installed and records the key the shell uses.
 - [ ] 4. Check that the window found is really the trail overlay before raising it (lines 181–200) — today any top-level window with the class `CursorTrailOverlayClass` is raised into `ZBID_SYSTEM_TOOLS`, including an unrelated app using the same generic class name or a sandboxed window. Two cheap checks:
   - Only raise click-through windows: `GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TRANSPARENT`.

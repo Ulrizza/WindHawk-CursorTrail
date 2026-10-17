@@ -16,6 +16,14 @@
 Companion mod for **Simple Cursor Trail**. It makes the trail visible above the
 taskbar and Start menu.
 
+Without this mod, the trail is drawn behind the taskbar and Start menu:
+
+![Simple Cursor Trail drawn behind the taskbar and Start menu](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/AlwaysOnTopBefore.gif)
+
+With this mod, it is drawn above them:
+
+![Simple Cursor Trail drawn above the taskbar and Start menu](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/AlwaysOnTopAfter.gif)
+
 It exists only to solve a Windows limitation: starting with Windows 8, windows
 live in fixed Z-order *bands* (`ZBID`), and a window in a lower band can never be
 drawn above a window in a higher band, no matter how `SetWindowPos`/`WS_EX_TOPMOST`

@@ -14,6 +14,8 @@
   can run after Windhawk has removed the mod's hooks (first AI-review fix). The
   hook now records the latest key, which also self-heals a stale one; the README
   step describing the hook was updated to match.
+- Added before/after visuals to the description
+  (`images/AlwaysOnTopBefore.gif`, `images/AlwaysOnTopAfter.gif`).
 
 ## 1.3
 - Re-added the companion-mod reference now that the helper ships: the README and
