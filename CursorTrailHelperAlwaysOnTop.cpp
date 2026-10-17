@@ -2,7 +2,7 @@
 // @id              cursor-trail-helper-always-on-top
 // @name            Simple Cursor Trail helper - Always on top
 // @description     Places the Simple Cursor Trail overlay above the taskbar and Start menu by moving it to a higher Z-order band
-// @version         1.2
+// @version         1.3
 // @author          Ulrizza
 // @github          https://github.com/Ulrizza
 // @license         MIT
