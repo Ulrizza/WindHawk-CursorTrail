@@ -7,6 +7,13 @@
 ## Simple Cursor Trail helper - always on top 1.2
 - Renamed the mod from **Cursor trail helper - always on top** to **Simple Cursor
   Trail helper - always on top**, to match the main mod's name.
+- Clarified the description's opening with a plain-language summary of what the
+  mod does, before the Z-order-band explanation.
+- Kept the `NtUserEnableIAMAccess` hook installed for the mod's whole lifetime
+  instead of adding/removing it at runtime, so no `Wh_ApplyHookOperations` call
+  can run after Windhawk has removed the mod's hooks (first AI-review fix). The
+  hook now records the latest key, which also self-heals a stale one; the README
+  step describing the hook was updated to match.
 
 ## 1.3
 - Re-added the companion-mod reference now that the helper ships: the README and

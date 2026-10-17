@@ -1,6 +1,6 @@
 // ==WindhawkMod==
 // @id              cursor-trail-helper-always-on-top
-// @name            Simple Cursor Trail helper - always on top
+// @name            Simple Cursor Trail helper - Always on top
 // @description     Places the Simple Cursor Trail overlay above the taskbar and Start menu by moving it to a higher Z-order band
 // @version         1.2
 // @author          Ulrizza
@@ -13,10 +13,13 @@
 /*
 # Simple Cursor Trail helper - always on top
 
-Companion mod for **Simple Cursor Trail**. It exists only to solve a Windows
-limitation: starting with Windows 8, windows live in fixed Z-order *bands*
-(`ZBID`), and a window in a lower band can never be drawn above a window in a
-higher band, no matter how `SetWindowPos`/`WS_EX_TOPMOST` is used.
+Companion mod for **Simple Cursor Trail**. It makes the trail visible above the
+taskbar and Start menu.
+
+It exists only to solve a Windows limitation: starting with Windows 8, windows
+live in fixed Z-order *bands* (`ZBID`), and a window in a lower band can never be
+drawn above a window in a higher band, no matter how `SetWindowPos`/`WS_EX_TOPMOST`
+is used.
 
 The `Simple Cursor Trail` overlay is a normal desktop-band window, while the
 Windows 11 taskbar sits in `ZBID_IMMERSIVE_MOGO` (6) and the Start menu and
@@ -31,9 +34,9 @@ band manipulation) and:
 
 1. Finds the overlay window by its class name (`CursorTrailOverlayClass`).
 2. Calls the undocumented `SetWindowBand(hwnd, NULL, 16)`.
-3. If that is denied, it hooks `NtUserEnableIAMAccess` to capture the IAM access
-   key the shell uses, then retries with that key. Capturing the key requires
-   pressing the **Win key** (or otherwise opening a shell surface) once after
+3. Also hooks `NtUserEnableIAMAccess` to record the IAM access key the shell
+   uses, and uses that key when the direct call is denied. The key is recorded
+   once the shell opens one of its surfaces (e.g. press the **Win key**) after
    the mod loads.
 
 The band is re-applied automatically if the overlay is recreated or the band is
@@ -88,46 +91,23 @@ static std::atomic<ULONG64> g_iamKey{0};
 static HANDLE g_stopEvent;
 static HANDLE g_workerThread;
 static HWND g_lastBanded;
-static std::atomic<bool> g_hookInstalled{false};
-static std::atomic<bool> g_unhookPending{false};
 
 // Poll quickly while looking for the overlay or applying the band, then back
 // off to a slow interval once the band is confirmed, to keep wakeups low.
 static const DWORD kActivePollMs = 1000;
 static const DWORD kStablePollMs = 5000;
 
-// Captures the IAM access key when the shell calls NtUserEnableIAMAccess.
-// The hook is removed by the worker thread (not from here) once captured.
+// Records the last IAM access key the shell used. The hook stays installed for
+// the whole lifetime of the mod: the shell only calls this when it opens one of
+// its surfaces, so the cost is negligible, and a fresh key overwrites a stale
+// one by itself. Removing/re-adding hooks at runtime would need
+// Wh_ApplyHookOperations, which must not run after Wh_ModBeforeUninit returns.
 static BOOL WINAPI NtUserEnableIAMAccessHook(ULONG64 key, BOOL enable) {
     BOOL result = pNtUserEnableIAMAccessOriginal(key, enable);
-    if (result && g_iamKey.load() == 0 && key != 0) {
+    if (result && key) {
         g_iamKey.store(key);
-        g_unhookPending.store(true);
-        Wh_Log(L"IAM access key captured");
     }
     return result;
-}
-
-// Installs the IAM access key hook if it isn't already installed. Called once
-// at load, and again if a captured key turns out to be stale.
-static void ArmIamHook(bool applyOperations) {
-    if (g_hookInstalled.load() || !pNtUserEnableIAMAccess) {
-        return;
-    }
-
-    if (WindhawkUtils::SetFunctionHook(pNtUserEnableIAMAccess,
-                                       NtUserEnableIAMAccessHook,
-                                       &pNtUserEnableIAMAccessOriginal)) {
-        g_hookInstalled.store(true);
-        if (applyOperations) {
-            // Hooks added at load are applied implicitly after Wh_ModInit;
-            // a re-arm at runtime has to apply them itself.
-            Wh_ApplyHookOperations();
-        }
-        Wh_Log(L"NtUserEnableIAMAccess hooked");
-    } else {
-        Wh_Log(L"Failed to hook NtUserEnableIAMAccess");
-    }
 }
 
 static bool ApplyBand(HWND hwnd) {
@@ -139,10 +119,6 @@ static bool ApplyBand(HWND hwnd) {
         pNtUserEnableIAMAccess(iamKey, FALSE);
         if (!ok) {
             Wh_Log(L"SetWindowBand (key) failed: %u", err);
-            // The key may have gone stale; drop it and re-arm the hook so a
-            // fresh key can be captured if the shell enables IAM access again.
-            g_iamKey.store(0);
-            ArmIamHook(true);
         }
         return ok != FALSE;
     }
@@ -165,14 +141,6 @@ static DWORD WINAPI BandWorkerThread(LPVOID) {
     for (;;) {
         if (WaitForSingleObject(g_stopEvent, waitMs) != WAIT_TIMEOUT) {
             break;
-        }
-
-        if (g_unhookPending.load() && g_hookInstalled.load() && pNtUserEnableIAMAccess) {
-            Wh_RemoveFunctionHook((void*)pNtUserEnableIAMAccess);
-            Wh_ApplyHookOperations();
-            g_hookInstalled.store(false);
-            g_unhookPending.store(false);
-            Wh_Log(L"NtUserEnableIAMAccess unhooked");
         }
 
         HWND hwnd = FindWindowW(kOverlayClass, nullptr);
@@ -229,7 +197,11 @@ BOOL Wh_ModInit() {
         return FALSE;
     }
 
-    ArmIamHook(false);
+    if (pNtUserEnableIAMAccess) {
+        WindhawkUtils::SetFunctionHook(pNtUserEnableIAMAccess,
+                                       NtUserEnableIAMAccessHook,
+                                       &pNtUserEnableIAMAccessOriginal);
+    }
 
     g_stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!g_stopEvent) {
