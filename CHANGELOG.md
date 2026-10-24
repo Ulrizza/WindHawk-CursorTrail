@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5
+- Folded the **Simple Cursor Trail helper - always on top** companion mod into
+  this mod as the new **Always on top** setting, enabled by default. The mod is
+  now also injected into the shell `explorer.exe`, which creates a layered,
+  click-through window in the UIAccess Z-order band (falling back to the
+  system-tools band), and the trail is drawn into that window so it shows above
+  the taskbar and Start menu. Turning the setting off unloads the `explorer.exe`
+  side and the trail falls back to its own window. The separate helper mod is
+  retired.
+
 ## 1.4
 - Renamed the companion mod to **Simple Cursor Trail helper - always on top**, to
   match this mod's name.

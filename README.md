@@ -1,7 +1,7 @@
 # Simple Cursor Trail
 
 A fully customizable cursor trail for the Windows desktop.  
-  
+
 ## Intro
 
 I always liked the original Windows cursor trail, but it was too limited, so I made this one. I personally enjoy it very much so I want to share it 😊
@@ -16,12 +16,6 @@ I cannot promise you anything because I don't have much free time but I enjoyed 
 1. Install [Windhawk](https://windhawk.net/).
 2. Install **Simple Cursor Trail** from the Windhawk mods catalog, or import the
    source (`CursorTrail.cpp`) from this repository via the Windhawk mod editor.
-
-## Always on top
-
-On Windows 11 the trail is drawn behind the taskbar and Start menu. Install the
-companion **Simple Cursor Trail helper - always on top** mod to lift the overlay
-into the system-tools Z-order band so it draws above them.
 
 ## Styles
 
@@ -49,6 +43,8 @@ the cursor at high speed.
 - **Color**: head-to-tail gradients, blend width, and ghost
   recoloring.
 - **Hotkey**: toggle the trail on/off with a customizable global hotkey.
+- **Always on top**: draw the trail above the taskbar and Start menu (on by
+  default).
 
 ## Settings
 
@@ -348,7 +344,14 @@ Show a circle animation when the hotkey toggles the trail.
 The animation is a circle outline (2px, in the cursor's color, centered on the trail start and following the cursor): it grows and fades out when disabling, and shrinks and fades in when enabling.  
 
 ### Trail offset
+
+#### X
+
 Fine-tune the trail origin horizontally in pixels (auto-centered by default, 0 = no adjustment)
+
+#### Y
+
+Fine-tune the trail origin vertically in pixels (auto-centered by default, 0 = no adjustment)
 
 `0 0`  
 ![tail_offset.x = -10](./images/tail_offset.0.0.gif)
@@ -356,9 +359,23 @@ Fine-tune the trail origin horizontally in pixels (auto-centered by default, 0 =
 `15 15`  
 ![tail_offset.y = +10](./images/tail_offset.15.15.gif)
 
+### Always on top
+
+Draw the trail above the taskbar, Start menu and other shell surfaces. Enabled by default. Explorer hosts a small transparent window in a higher Z-order band, and the trail is drawn into it. Turn off if it causes issues: turning it off unloads the Explorer side.
+
+Without **Always on top**, the trail is drawn behind the taskbar and Start menu:
+
+![Simple Cursor Trail drawn behind the taskbar and Start menu](./images/AlwaysOnTopBefore.gif)
+
+With **Always on top**:
+
+![Simple Cursor Trail drawn above the taskbar and Start menu](./images/AlwaysOnTopAfter.gif)
+
+Windows gives every window a fixed Z-order band, and a window in a lower band can never be drawn above a window in a higher one. The shell creates a hidden window with `CreateWindowInBand`, trying the UIAccess band first and falling back to the system-tools band; the trail process draws into it and falls back to its own overlay window if that is not possible.
+
 ## Architecture
 
-The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scope, grouped into five struct instances:
+The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scope, grouped into struct instances:
 
 | Instance | Type | Purpose |
 |---|---|---|
@@ -366,13 +383,14 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 | `cursor` | `CursorState` | Cursor geometry cache: `visualOffset` (mutex-protected) plus render-thread-only cursor dims (`bmWidth`/`bmHeight`/DPI scale) and the per-`HCURSOR` `geomCache`. |
 | `origin` | `OriginTransition` | Poll-thread-owned ease-in-out state for the trail-origin glide on cursor-image change. |
 | `render` | `RenderResources` | Direct2D factory/target/brushes, stroke style, the cached backbuffer, and the per-`HCURSOR` `cursorBitmapCache` (tinted bitmap variants) used by the ghost style. Render-thread-only. |
-| `runtime` | `Runtime` | Overlay window/threads, the `history` deque, atomics, multimedia timer, and per-frame render state. |
+| `runtime` | `Runtime` | Overlay and band window handles, the draw target and its visibility, overlay/poll threads, the `history` deque, atomics, multimedia timer, and per-frame render state. |
 
 ### Threads
 
-- **Overlay thread** (`OverlayThreadProc`) — creates the `WS_EX_LAYERED` topmost window, runs the message loop, and does all Direct2D rendering via `SmearTimerProc`.
+- **Overlay thread** (`OverlayThreadProc`) — creates the `WS_EX_LAYERED` topmost window, runs the message loop, does all Direct2D rendering via `SmearTimerProc`, and draws into explorer's band window when it is available.
 - **Poll thread** (`PollThreadProc`) — samples the cursor every 1 ms while the overlay is active (20 ms while idle, 250 ms while the trail is off via hotkey, 1000 ms while a fullscreen game is detected) and pushes decimated samples into `runtime.history`; it also runs the fullscreen-game check (every 500 ms, or once per wake — about 1 s — while a game is detected) and wakes the overlay on a change.
 - **Multimedia timer** (`MMTimerCallback`, a system thread) — posts `WM_TIMER` at ~125 Hz to wake the overlay thread. It never touches Direct2D directly.
+- **Band thread** (`BandThread`) — runs only in the shell `explorer.exe`. Creates a layered, click-through window with `CreateWindowInBand` (UIAccess band first, system-tools band as fallback), runs its message loop, and watches the tool process so the window hides when that process exits. No hooks, no polling.
 
 ### Locking model
 
@@ -393,7 +411,7 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 5. Bind the render target to the dirty rect (union of this frame's bbox and the previous frame's), undo the origin shift with a translation, and `Clear` only that region — the backbuffer is not wiped in full each frame.
 6. `RenderTrail` — dispatch to the active style renderer (`RenderSimpleLineStyle` or `RenderCursorGhostStyle`); both paint tail → head so the newest part stays on top at self-crossings.
 7. `RenderToggleEffect` — optional enable/disable hotkey circle (2px outline, centered on the trail head, follows the cursor).
-8. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow`.
+8. `BlitOverlay` — dirty-rect tracking plus `UpdateLayeredWindow` into the current draw target (explorer's band window or the mod's own overlay), with an automatic fallback to the own window.
 9. `PruneCursorCaches` (ghost only) — drop cached cursor geometry/bitmaps no longer referenced by the trail.
 
 ### Settings & blending
@@ -405,13 +423,18 @@ The mod is a single translation unit (`CursorTrail.cpp`). All state is file-scop
 
 `UpdateCursorCenterOffset` caches, per `HCURSOR`: the visible-pixel-center offset (the line-style trail origin), the hotspot, the alpha-trimmed visible bounds, and the DPI scale. It is rebuilt when the cursor handle changes or the effective per-monitor DPI changes. The geometry is computed without holding `cursor.offsetMutex` (only `visualOffset` is published under the lock), and the visible-bounds scan plus the cursor-bitmap building share one lazily-created `IWICImagingFactory` released at teardown. `ComputeCursorGeom` holds the shared computation; `GetCursorGeom` lazily computes geometry for any cursor handle still referenced by the trail (so the ghost style can draw older images after an image change). Ghost samples store the raw cursor hotspot, and the ghost renderer anchors each copy by its own image's hotspot, so a copy lands exactly where that cursor image was — independent of the render thread's offset refresh. The ghost style also builds and caches D2D bitmaps per `HCURSOR` via `EnsureCursorBitmap`, rendering the cursor with `DrawIconEx` at the on-screen pixel size (color + mask + anti-aliased alpha) so copies are blitted 1:1 without resampling. The `ghostOptions.color` gradient (when set) is baked into the cached pixels by sampling it at `kGhostTintSteps` ratios (one bitmap per sample; an empty color list yields a single untinted variant), and `GetCursorBitmap(hCursor, ratio)` selects the nearest variant for each copy. `color.replace.mode` picks the pixels to recolor: `whole` swaps every non-transparent pixel; `auto` splits each pixel between two reference colors — the replace color (the cursor's enclosed center color from `AnalyzeCursorColors`, falling back to the largest region when nothing is enclosed) and a keep color (the largest boundary/outline region) — swapping pixels closer to the replace color with a small softness band around the midpoint; `custom` replaces pixels whose color matches `color.replace.custom` (soft falloff so anti-aliased edges blend), leaving every other color untouched. Both caches are released with the render target.
 
+### Always-on-top injection
+
+The same source is injected into two processes. The dedicated `windhawk.exe` tool process runs the trail; the shell `explorer.exe` process only hosts the band window, because only Explorer can create a window in a Z-order band above the taskbar and Start menu. `BandThread` creates a 1×1 layered, click-through window with `CreateWindowInBand`, trying the UIAccess band first and falling back to the system-tools band, then runs its message loop. The tool process finds that window by class, verifies that it belongs to the shell, and draws into it with `UpdateLayeredWindow`; a failed blit blacklists that band window and falls back to the mod's own overlay. The tool also posts `kMsgBandWatch` with its PID, and the band thread validates that the sender owns a click-through `CursorTrailOverlayClass` window owned by `windhawk.exe` / `windhawk-mod.exe` before watching the process handle and hiding the band window when it exits. Non-shell `explorer.exe` instances (separate folder windows) exit from `Wh_ModInit` immediately.
+
 ### Lifecycle
 
 - `WhTool_ModInit` — `LoadSettings()` then spawns `OverlayThreadProc`.
 - `WhTool_ModSettingsChanged` — posts `kMsgApplySettings` (reloads settings on the overlay thread under `runtime.historyMutex`) and `kMsgApplyHotkey` to re-register the hotkey on its thread.
 - `WhTool_ModUninit` — signals the poll thread and posts `WM_QUIT` to the overlay window; the overlay thread tears itself down (timer, Direct2D, window) and is joined with an unbounded wait.
 - The overlay thread registers the `hotkeyOptions.key` setting (`ApplyHotkey`) right after creating the window and unregisters it before destroying the window. `WM_HOTKEY` flips `runtime.trailEnabled`, which suppresses sampling/rendering like the fullscreen-game path does, and (when `hotkeyOptions.animate` is on) calls `StartToggleEffect` to play the circle animation centered on the trail head (disable: grows + fades out, ease in; enable: shrinks + fades in, ease out; 400 ms, 2px outline, diameter 6× the cursor, colored by `GetCursorColor`'s ghost-`auto` pick, following the cursor).
-- The `Wh_ModInit` / `Wh_ModAfterInit` / `Wh_ModUninit` block at the bottom of the file is Windhawk's tool-mod launcher boilerplate and should be left as-is.
+- In the shell `explorer.exe`, `Wh_ModInit` takes a separate path while `alwaysOnTop` is on: it starts `BandThread` and returns, never reaching the tool-mod launcher or the tool-process entry points. `Wh_ModSettingsChanged` requests a reload when the setting is turned off; `Wh_ModUninit` stops and joins the thread, destroying the band window, and the reloaded instance exits in `Wh_ModInit`. It never calls `ExitProcess`.
+- The `Wh_ModInit` / `Wh_ModAfterInit` / `Wh_ModUninit` block at the bottom of the file started as Windhawk's tool-mod launcher boilerplate; it now also dispatches the `explorer.exe` injection and must never run the tool-mod shutdown path there.
 
 ## Licence
 
@@ -424,3 +447,8 @@ Part of this mod is adapted from
 [TheatriChris](https://github.com/chrisc44890), Copyright (c) TheatriChris
 (MIT): the overlay-window scaffolding, the fullscreen-game detection, and
 parts of the render loop.
+
+Part of this mod is adapted from
+[Pointer Afterimage Motion Blur](https://windhawk.net/mods/pointer-afterimage-motion-blur) by
+[sidlikesgrapess](https://github.com/sidlikesgrapess) (Unlicense): the explorer-side band
+window, its process-exit watch, and `IsShellExplorer`, used by Always on top.

@@ -1,12 +1,13 @@
 // ==WindhawkMod==
 // @id              cursor-trail
 // @name            Simple Cursor Trail
-// @description     A fully customizable cursor trail overlay for the Windows desktop.
-// @version         1.4
+// @description     A fully customizable cursor trail for the Windows desktop.
+// @version         1.5
 // @author          Ulrizza
 // @github          https://github.com/Ulrizza
 // @license         MIT
 // @include         windhawk.exe
+// @include         explorer.exe
 // @compilerOptions -ld2d1 -lole32 -lgdi32 -lshell32 -lwindowscodecs -lwinmm -lshcore
 // ==/WindhawkMod==
 
@@ -30,12 +31,6 @@ I cannot promise you anything because I don't have much free time but I enjoyed 
 1. Install [Windhawk](https://windhawk.net/).
 2. Install **Simple Cursor Trail** from the Windhawk mods catalog, or import the
    source (`CursorTrail.cpp`) from this repository via the Windhawk mod editor.
-
-## Always on top
-
-On Windows 11 the trail is drawn behind the taskbar and Start menu. Install the
-companion **Simple Cursor Trail helper - always on top** mod to lift the overlay
-into the system-tools Z-order band so it draws above them.
 
 ## Styles
 
@@ -63,6 +58,8 @@ the cursor at high speed.
 - **Color**: head-to-tail gradients, blend width, and ghost
   recoloring.
 - **Hotkey**: toggle the trail on/off with a customizable global hotkey.
+- **Always on top**: draw the trail above the taskbar and Start menu (on by
+  default).
 
 ## Settings
 
@@ -362,13 +359,34 @@ Show a circle animation when the hotkey toggles the trail.
 The animation is a circle outline (2px, in the cursor's color, centered on the trail start and following the cursor): it grows and fades out when disabling, and shrinks and fades in when enabling.  
 
 ### Trail offset
+
+#### X
+
 Fine-tune the trail origin horizontally in pixels (auto-centered by default, 0 = no adjustment)
+
+#### Y
+
+Fine-tune the trail origin vertically in pixels (auto-centered by default, 0 = no adjustment)
 
 `0 0`  
 ![tail_offset.x = -10](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/tail_offset.0.0.gif)
 
 `15 15`  
 ![tail_offset.y = +10](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/tail_offset.15.15.gif)
+
+### Always on top
+
+Draw the trail above the taskbar, Start menu and other shell surfaces. Enabled by default. Explorer hosts a small transparent window in a higher Z-order band, and the trail is drawn into it. Turn off if it causes issues: turning it off unloads the Explorer side.
+
+Without **Always on top**, the trail is drawn behind the taskbar and Start menu:
+
+![Simple Cursor Trail drawn behind the taskbar and Start menu](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/AlwaysOnTopBefore.gif)
+
+With **Always on top**:
+
+![Simple Cursor Trail drawn above the taskbar and Start menu](https://raw.githubusercontent.com/Ulrizza/WindHawk-CursorTrail/main/images/AlwaysOnTopAfter.gif)
+
+Windows gives every window a fixed Z-order band, and a window in a lower band can never be drawn above a window in a higher one. The shell creates a hidden window with `CreateWindowInBand`, trying the UIAccess band first and falling back to the system-tools band; the trail process draws into it and falls back to its own overlay window if that is not possible.
 
 ## Licence
 
@@ -381,6 +399,11 @@ Part of this mod is adapted from
 [TheatriChris](https://github.com/chrisc44890), Copyright (c) TheatriChris
 (MIT): the overlay-window scaffolding, the fullscreen-game detection, and
 parts of the render loop.
+
+Part of this mod is adapted from
+[Pointer Afterimage Motion Blur](https://windhawk.net/mods/pointer-afterimage-motion-blur) by
+[sidlikesgrapess](https://github.com/sidlikesgrapess) (Unlicense): the explorer-side band
+window, its process-exit watch, and `IsShellExplorer`, used by Always on top.
 
 */
 // ==/WindhawkModReadme==
@@ -528,6 +551,9 @@ parts of the render loop.
     $name: Y
     $description: Fine-tune the trail origin vertically in pixels (auto-centered by default, 0 = no adjustment)
   $name: Trail offset
+- alwaysOnTop: true
+  $name: Always on top
+  $description: Draw the trail above the taskbar, Start menu and other shell surfaces. Enabled by default. Explorer hosts a small transparent window in a higher Z-order band, and the trail is drawn into it. Turn off if it causes issues: turning it off unloads the Explorer side.
 */
 // ==/WindhawkModSettings==
 
@@ -540,6 +566,7 @@ parts of the render loop.
 #include <mmsystem.h>
 #include <algorithm>
 #include <atomic>
+#include <cwchar>
 #include <cwctype>
 #include <deque>
 #include <mutex>
@@ -547,6 +574,18 @@ parts of the render loop.
 #include <unordered_map>
 #include <vector>
 #include <windhawk_utils.h>
+
+// Window class of the trail overlay. The explorer-side band thread uses it to
+// validate the process that asks it to watch for an exit.
+constexpr wchar_t kOverlayWindowClass[] = L"CursorTrailOverlayClass";
+
+// Window class of the explorer-side band window the tool process draws into.
+constexpr wchar_t kBandWindowClass[] = L"CursorTrailBandClass";
+constexpr UINT kMsgBandWatch = WM_APP + 4;  // tool -> band window: wParam is the tool PID
+
+// Z-order bands tried by CreateWindowInBand, highest first.
+constexpr DWORD kBandUIAccess = 2;       // ZBID_UIACCESS
+constexpr DWORD kBandSystemTools = 16;   // ZBID_SYSTEM_TOOLS
 
 // Position sample used by the polling thread and spatial decimation in the render loop.
 struct Sample {
@@ -592,6 +631,7 @@ struct Settings {
     int   tailSize = 2000;
     DWORD sizeTimeout = 0;
     bool  antialiasing = true;
+    bool  alwaysOnTop = true;                         // draw into explorer's band window
     bool  isGhost = false;                            // active style is cursor_ghost
     int   ghostSpacing = 0;                           // extra px between ghost copies
     float ghostSpawnDist = 2.0f;                      // px cursor must travel before a new ghost is stamped
@@ -688,6 +728,11 @@ struct RenderResources {
 // Runtime state: threads, window, history, atomics, timer, and frame state.
 struct Runtime {
     HWND   overlayHwnd = NULL;
+    HWND   bandHwnd = NULL;                   // overlay-thread-only; explorer band window
+    HWND   drawHwnd = NULL;                   // overlay-thread-only; own window or band
+    HWND   failedBand = NULL;                 // band that rejected UpdateLayeredWindow
+    HWND   watchedBand = NULL;                // band already told to watch this process
+    bool   drawShown = false;                 // overlay-thread-only; drawHwnd visibility
     HANDLE threadHandle = NULL;
     DWORD  overlayThreadId = 0;
     std::deque<Sample> history;
@@ -1089,6 +1134,7 @@ static bool LoadColorSettings(const wchar_t* prefix, const wchar_t* defaultColor
 }
 
 void LoadSettings() {
+    settings.alwaysOnTop = Wh_GetIntSetting(L"alwaysOnTop") != 0;
     settings.tailOffsetX = Wh_GetIntSetting(L"tail_offset.x");
     settings.tailOffsetY = Wh_GetIntSetting(L"tail_offset.y");
 
@@ -2163,6 +2209,116 @@ static void EvictByTime(DWORD now) {
 // Forward declaration: MMTimerCallback is defined later, before OverlayThreadProc.
 void CALLBACK MMTimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
 
+// --- Band window (tool process side) ---------------------------------------
+// The shell explorer.exe creates a layered, click-through window in a Z-order
+// band above the taskbar (see BandThread below). The tool process draws into it
+// when it exists and falls back to its own overlay window otherwise.
+
+// Whether hwnd still belongs to the current shell explorer.exe.
+static bool IsShellBandWindow(HWND hwnd) {
+    if (!hwnd || !IsWindow(hwnd)) {
+        return false;
+    }
+    HWND shell = GetShellWindow();
+    if (!shell) {
+        return true;  // Explorer is still starting; the class is ours.
+    }
+    DWORD owner = 0, shellPid = 0;
+    if (!GetWindowThreadProcessId(hwnd, &owner) || !owner) {
+        return false;
+    }
+    GetWindowThreadProcessId(shell, &shellPid);
+    return owner == shellPid;
+}
+
+// Finds the shell's band window, skipping one that rejected a blit earlier.
+static HWND FindBandWindow() {
+    if (runtime.failedBand && !IsWindow(runtime.failedBand)) {
+        runtime.failedBand = nullptr;
+    }
+    if (runtime.watchedBand && !IsWindow(runtime.watchedBand)) {
+        runtime.watchedBand = nullptr;
+    }
+
+    for (HWND hwnd = FindWindowExW(nullptr, nullptr, kBandWindowClass, nullptr);
+         hwnd; hwnd = FindWindowExW(nullptr, hwnd, kBandWindowClass, nullptr)) {
+        if (hwnd == runtime.failedBand || !IsShellBandWindow(hwnd)) {
+            continue;
+        }
+        return hwnd;
+    }
+    return nullptr;
+}
+
+// Returns the window the next frame should be drawn into.
+static HWND ResolveDrawTarget() {
+    if (!settings.alwaysOnTop) {
+        return runtime.overlayHwnd;
+    }
+
+    if (runtime.bandHwnd && runtime.bandHwnd != runtime.failedBand &&
+        IsShellBandWindow(runtime.bandHwnd)) {
+        return runtime.bandHwnd;
+    }
+
+    runtime.bandHwnd = FindBandWindow();
+    if (!runtime.bandHwnd) {
+        return runtime.overlayHwnd;
+    }
+
+    // Tell the band window which process to watch, so it hides when this
+    // process exits however it exits.
+    if (runtime.watchedBand != runtime.bandHwnd) {
+        if (PostMessageW(runtime.bandHwnd, kMsgBandWatch,
+                         (WPARAM)GetCurrentProcessId(), 0)) {
+            runtime.watchedBand = runtime.bandHwnd;
+        }
+    }
+    return runtime.bandHwnd;
+}
+
+// Shows or hides a window, avoiding a wait when it belongs to another process.
+static void ShowWindowTarget(HWND hwnd, bool show) {
+    if (!hwnd) {
+        return;
+    }
+    if (hwnd == runtime.overlayHwnd) {
+        ShowWindow(hwnd, show ? SW_SHOWNA : SW_HIDE);
+    } else {
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE |
+                         SWP_ASYNCWINDOWPOS |
+                         (show ? SWP_SHOWWINDOW
+                               : (SWP_HIDEWINDOW | SWP_NOZORDER)));
+    }
+}
+
+// Shows or hides the current draw target when its state changes.
+static void ShowDrawWindow(bool show) {
+    if (!runtime.drawHwnd) {
+        runtime.drawHwnd = runtime.overlayHwnd;
+    }
+    if (!runtime.drawHwnd || runtime.drawShown == show) {
+        return;
+    }
+    ShowWindowTarget(runtime.drawHwnd, show);
+    runtime.drawShown = show;
+}
+
+// Switches the draw target, hiding the old one. The new target is shown after a
+// successful blit, so a failed band window never blanks the trail.
+static void SwitchDrawTarget(HWND target) {
+    if (!target || target == runtime.drawHwnd) {
+        return;
+    }
+    HWND old = runtime.drawHwnd;
+    runtime.drawHwnd = target;
+    runtime.drawShown = false;
+    if (old) {
+        ShowWindowTarget(old, false);
+    }
+}
+
 // --- Idle handling ---------------------------------------------------------
 // The render timer and the 1 ms timer resolution are only needed while there is
 // something to draw. When the trail has fully faded, no toggle effect is playing
@@ -2176,9 +2332,7 @@ void CALLBACK MMTimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_
 static void ResumeRenderTimer() {
     runtime.idleWakePending.store(false);
     runtime.overlayIdle.store(false);
-    if (runtime.overlayHwnd) {
-        ShowWindow(runtime.overlayHwnd, SW_SHOWNA);
-    }
+    ShowDrawWindow(true);
     if (!runtime.periodRaised) {
         timeBeginPeriod(1);
         runtime.periodRaised = true;
@@ -2229,8 +2383,8 @@ static void EnterIdleIfInactive(DWORD now, bool idleAllowed) {
     }
     // Only hide the overlay when it shows nothing; a static trail must stay
     // visible while the render timer is stopped.
-    if (runtime.overlayHwnd && !runtime.hasPrevDirty) {
-        ShowWindow(runtime.overlayHwnd, SW_HIDE);
+    if (!runtime.hasPrevDirty) {
+        ShowDrawWindow(false);
     }
 }
 
@@ -2742,11 +2896,12 @@ static void RenderTrail(const std::vector<D2D1_POINT_2F>& smoothed,
     runtime.needsClear = false;
 }
 
-// Blits the backbuffer to the overlay window via UpdateLayeredWindow, using a
+// Blits the backbuffer to the current draw target (the explorer band window when
+// available, otherwise the overlay window) via UpdateLayeredWindow, using a
 // dirty rect when possible and falling back to full screen otherwise. Skips the
 // blit entirely when there's nothing to show (prevents full-screen compositor
 // updates every frame when the cursor is stationary).
-static void BlitOverlay(HWND hwnd, HDC hdcScreen, int vX, int vY, int vW, int vH,
+static void BlitOverlay(HDC hdcScreen, int vX, int vY, int vW, int vH,
                         const RECT& curBBox, bool hasCurBBox) {
     if (!hasCurBBox && !runtime.hasPrevDirty && !runtime.needsClear) {
         ReleaseDC(NULL, hdcScreen);
@@ -2801,19 +2956,49 @@ static void BlitOverlay(HWND hwnd, HDC hdcScreen, int vX, int vY, int vW, int vH
     blend.SourceConstantAlpha = 255;
     blend.AlphaFormat = AC_SRC_ALPHA;
 
-    if (useDirtyRect) {
-        POINT ptPos = { vX + dirtyRect.left, vY + dirtyRect.top };
-        SIZE sizeWnd = { dirtyRect.right - dirtyRect.left,
-                         dirtyRect.bottom - dirtyRect.top };
-        POINT ptSrc = { dirtyRect.left, dirtyRect.top };
-        UpdateLayeredWindow(hwnd, hdcScreen, &ptPos, &sizeWnd,
-                            render.hdcMem, &ptSrc, 0, &blend, ULW_ALPHA);
-    } else {
+    auto blitTo = [&](HWND target) -> BOOL {
+        if (!target) {
+            return FALSE;
+        }
+        if (useDirtyRect) {
+            POINT ptPos = { vX + dirtyRect.left, vY + dirtyRect.top };
+            SIZE sizeWnd = { dirtyRect.right - dirtyRect.left,
+                             dirtyRect.bottom - dirtyRect.top };
+            POINT ptSrc = { dirtyRect.left, dirtyRect.top };
+            return UpdateLayeredWindow(target, hdcScreen, &ptPos, &sizeWnd,
+                                       render.hdcMem, &ptSrc, 0, &blend,
+                                       ULW_ALPHA);
+        }
+
         POINT ptPos = { vX, vY };
         SIZE sizeWnd = { vW, vH };
         POINT ptSrc = { 0, 0 };
-        UpdateLayeredWindow(hwnd, hdcScreen, &ptPos, &sizeWnd,
-                            render.hdcMem, &ptSrc, 0, &blend, ULW_ALPHA);
+        return UpdateLayeredWindow(target, hdcScreen, &ptPos, &sizeWnd,
+                                   render.hdcMem, &ptSrc, 0, &blend,
+                                   ULW_ALPHA);
+    };
+
+    HWND target = ResolveDrawTarget();
+    BOOL ok = blitTo(target);
+    if (!ok && target && target != runtime.overlayHwnd) {
+        DWORD err = GetLastError();
+        Wh_Log(L"Drawing in the explorer band window failed (%u), using the "
+               L"overlay window",
+               err);
+        runtime.failedBand = target;
+        if (runtime.bandHwnd == target) {
+            runtime.bandHwnd = nullptr;
+        }
+        ShowWindowTarget(target, false);
+        target = runtime.overlayHwnd;
+        ok = blitTo(target);
+    }
+
+    if (ok) {
+        SwitchDrawTarget(target);
+        ShowDrawWindow(true);
+    } else {
+        Wh_Log(L"UpdateLayeredWindow failed (%u)", GetLastError());
     }
 
     ReleaseDC(NULL, hdcScreen);
@@ -3096,7 +3281,7 @@ VOID CALLBACK SmearTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTim
             }
         }
 
-        BlitOverlay(hwnd, hdcScreen, vX, vY, vW, vH, curBBox, hasCurBBox);
+        BlitOverlay(hdcScreen, vX, vY, vW, vH, curBBox, hasCurBBox);
 
         // Mark the revisions we actually drew. Any change that arrived while
         // this frame was being built leaves contentRevision/settingsVersion
@@ -3203,13 +3388,11 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
     D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &render.pD2DFactory);
 
     HINSTANCE hInstance = GetModuleHandle(NULL);
-    // Unique overlay window class name (must not collide with other mods).
-    const wchar_t CLASS_NAME[] = L"CursorTrailOverlayClass";
 
     WNDCLASS wc = { };
     wc.lpfnWndProc = OverlayWndProc; 
     wc.hInstance = hInstance;
-    wc.lpszClassName = CLASS_NAME;
+    wc.lpszClassName = kOverlayWindowClass;
 
     RegisterClass(&wc);
 
@@ -3220,7 +3403,7 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
 
     runtime.overlayHwnd = CreateWindowEx(
         WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-        CLASS_NAME,
+        kOverlayWindowClass,
         L"CursorTrailOverlay",
         WS_POPUP,
         screenX, screenY, screenW, screenH,
@@ -3236,6 +3419,8 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
 
     if (!runtime.overlayHwnd) return 0;
 
+    runtime.drawHwnd = runtime.overlayHwnd;
+    runtime.drawShown = true;
     ShowWindow(runtime.overlayHwnd, SW_SHOWNA);
 
     // Register the enable/disable hotkey (no-op when the setting is empty).
@@ -3300,9 +3485,18 @@ DWORD WINAPI OverlayThreadProc(LPVOID lpParam) {
         runtime.periodRaised = false;
     }
 
+    // Hide the current target first: if it is the explorer band window, it
+    // belongs to another process and is hidden asynchronously.
+    ShowDrawWindow(false);
+    runtime.drawHwnd = nullptr;
+    runtime.drawShown = false;
+    runtime.bandHwnd = nullptr;
+    runtime.watchedBand = nullptr;
+    runtime.failedBand = nullptr;
+
     UnregisterHotKey(runtime.overlayHwnd, kHotkeyId);
     DestroyWindow(runtime.overlayHwnd);
-    UnregisterClass(CLASS_NAME, hInstance);
+    UnregisterClass(kOverlayWindowClass, hInstance);
 
     if (g_pWicFactory) { g_pWicFactory->Release(); g_pWicFactory = nullptr; }
     CoUninitialize();
@@ -3365,6 +3559,186 @@ void WhTool_ModSettingsChanged() {
     }
 }
 
+// --- Always on top (explorer.exe) ------------------------------------------
+// Windows gives every window a fixed Z-order band, and a window in a lower band
+// can never be drawn above a window in a higher one. Only the shell process can
+// create a window in a band above the taskbar and Start menu, so the mod is also
+// injected into explorer.exe. That side creates a layered, click-through window
+// with CreateWindowInBand and runs its message loop; the trail process finds
+// that window and draws into it with UpdateLayeredWindow.
+
+// Only the shell's explorer.exe hosts the band window: not folder windows in
+// processes of their own, and not the brief ones that hand a path to the shell
+// ("Show in folder", explorer.exe C:\...). Once the desktop exists, its owner
+// is the shell; while explorer is starting there is none yet, and the command
+// line tells.
+static bool IsShellExplorer() {
+    if (HWND shell = GetShellWindow()) {
+        DWORD owner = 0;
+        GetWindowThreadProcessId(shell, &owner);
+        return owner == GetCurrentProcessId();
+    }
+
+    WCHAR cmd[1024];
+    wcsncpy_s(cmd, GetCommandLineW(), _TRUNCATE);
+    CharLowerBuffW(cmd, (DWORD)wcslen(cmd));
+    return !wcsstr(cmd, L"/factory") && !wcsstr(cmd, L"/separate") &&
+           !wcsstr(cmd, L"-embedding");
+}
+
+// Only accept the actual trail overlay: a click-through window owned by the
+// Windhawk process. This keeps an unrelated top-level window that happens to
+// use the same class name, or a sandboxed window, from making the band window
+// watch an arbitrary process.
+static bool IsTrailOverlay(HWND hwnd) {
+    if (!(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TRANSPARENT)) {
+        return false;
+    }
+
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (!pid) {
+        return false;
+    }
+
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) {
+        return false;
+    }
+
+    WCHAR path[MAX_PATH];
+    DWORD size = ARRAYSIZE(path);
+    BOOL ok = QueryFullProcessImageNameW(process, 0, path, &size);
+    CloseHandle(process);
+    if (!ok) {
+        return false;
+    }
+
+    const wchar_t* name = path;
+    for (const wchar_t* p = path; *p; ++p) {
+        if (*p == L'\\') {
+            name = p + 1;
+        }
+    }
+
+    return lstrcmpiW(name, L"windhawk.exe") == 0 ||
+           lstrcmpiW(name, L"windhawk-mod.exe") == 0;
+}
+
+extern "C" IMAGE_DOS_HEADER __ImageBase;   // this mod's module
+
+static HANDLE g_bandThread;
+static DWORD g_bandThreadId;
+
+// Runs only in the shell explorer.exe. Creates the band window the tool process
+// draws into and, when asked, hides it as soon as that process exits.
+static DWORD WINAPI BandThread(LPVOID) {
+    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    HINSTANCE inst = (HINSTANCE)&__ImageBase;
+
+    WNDCLASSW wc = {};
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = inst;
+    wc.lpszClassName = kBandWindowClass;
+    RegisterClassW(&wc);
+
+    using CreateWindowInBand_t = HWND(WINAPI*)(
+        DWORD, LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HMENU,
+        HINSTANCE, LPVOID, DWORD);
+    auto createInBand = (CreateWindowInBand_t)GetProcAddress(
+        GetModuleHandleW(L"user32.dll"), "CreateWindowInBand");
+
+    HWND hwnd = nullptr;
+    static const DWORD bands[] = {kBandUIAccess, kBandSystemTools};
+    if (createInBand) {
+        for (DWORD band : bands) {
+            hwnd = createInBand(
+                WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW |
+                    WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+                kBandWindowClass, L"", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr,
+                inst, nullptr, band);
+            Wh_Log(L"CreateWindowInBand(%u): %p (%u)", band, hwnd,
+                   hwnd ? 0 : GetLastError());
+            if (hwnd) {
+                break;
+            }
+        }
+    } else {
+        Wh_Log(L"CreateWindowInBand not found");
+    }
+
+    HANDLE watched = nullptr;
+    for (bool quit = !hwnd; !quit;) {
+        if (MsgWaitForMultipleObjects(watched ? 1 : 0, &watched, FALSE,
+                                      INFINITE, QS_ALLINPUT) == WAIT_OBJECT_0 &&
+            watched) {
+            // The tool process ended, however it ended: never leave its last
+            // frame on screen.
+            ShowWindow(hwnd, SW_HIDE);
+            CloseHandle(watched);
+            watched = nullptr;
+            continue;
+        }
+
+        MSG msg;
+        while (!quit && PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) {
+                quit = true;
+            } else if (msg.message == kMsgBandWatch && msg.hwnd == hwnd) {
+                // Accept only a process that owns the mod's own overlay window.
+                DWORD pid = (DWORD)msg.wParam;
+                bool ownsOverlay = false;
+                for (HWND t = FindWindowExW(nullptr, nullptr,
+                                            kOverlayWindowClass, nullptr);
+                     t; t = FindWindowExW(nullptr, t, kOverlayWindowClass,
+                                         nullptr)) {
+                    DWORD owner = 0;
+                    if (!GetWindowThreadProcessId(t, &owner) || owner != pid) {
+                        continue;
+                    }
+                    if (IsTrailOverlay(t)) {
+                        ownsOverlay = true;
+                        break;
+                    }
+                }
+                if (ownsOverlay) {
+                    if (HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid)) {
+                        if (watched) {
+                            CloseHandle(watched);
+                        }
+                        watched = process;
+                    }
+                }
+            } else {
+                DispatchMessageW(&msg);
+            }
+        }
+    }
+
+    if (watched) {
+        CloseHandle(watched);
+    }
+    if (hwnd) {
+        DestroyWindow(hwnd);
+    }
+    UnregisterClassW(kBandWindowClass, inst);
+    return 0;
+}
+
+static void StopBandThread() {
+    if (!g_bandThread) {
+        return;
+    }
+    // Post again while the thread's message queue may not exist yet.
+    do {
+        PostThreadMessageW(g_bandThreadId, WM_QUIT, 0, 0);
+    } while (WaitForSingleObject(g_bandThread, 50) == WAIT_TIMEOUT);
+    CloseHandle(g_bandThread);
+    g_bandThread = nullptr;
+}
+
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // Windhawk tool mod implementation for mods which don't need to inject to other
 // processes or hook other functions. Context:
@@ -3381,6 +3755,7 @@ void WhTool_ModSettingsChanged() {
 
 bool g_isToolModProcessLauncher;
 HANDLE g_toolModProcessMutex;
+bool g_isExplorer;
 
 void WINAPI EntryPoint_Hook() {
     Wh_Log(L">");
@@ -3388,6 +3763,28 @@ void WINAPI EntryPoint_Hook() {
 }
 
 BOOL Wh_ModInit() {
+    // The same source is also injected into the shell explorer.exe, where it
+    // only hosts the band window (Explorer is the process that can create a
+    // window above the taskbar and Start menu).
+    WCHAR exePath[MAX_PATH];
+    if (GetModuleFileNameW(nullptr, exePath, ARRAYSIZE(exePath))) {
+        const WCHAR* name = wcsrchr(exePath, L'\\');
+        if (name && lstrcmpiW(name + 1, L"explorer.exe") == 0) {
+            if (!IsShellExplorer() || !Wh_GetIntSetting(L"alwaysOnTop")) {
+                return FALSE;
+            }
+            g_isExplorer = true;
+            g_bandThread = CreateThread(nullptr, 0, BandThread, nullptr, 0,
+                                        &g_bandThreadId);
+            if (!g_bandThread) {
+                Wh_Log(L"CreateThread failed");
+                g_isExplorer = false;
+                return FALSE;
+            }
+            return TRUE;
+        }
+    }
+
     DWORD sessionId;
     if (ProcessIdToSessionId(GetCurrentProcessId(), &sessionId) &&
         sessionId == 0) {
@@ -3527,15 +3924,35 @@ void Wh_ModAfterInit() {
     CloseHandle(pi.hThread);
 }
 
-void Wh_ModSettingsChanged() {
+BOOL Wh_ModSettingsChanged(BOOL* bReload) {
+    if (bReload) {
+        *bReload = FALSE;
+    }
+
+    if (g_isExplorer) {
+        // Windhawk reloads the mod after this callback, so Wh_ModInit can keep
+        // the explorer side unloaded while the setting is off and load it again
+        // when the setting is turned back on.
+        if (bReload) {
+            *bReload = !Wh_GetIntSetting(L"alwaysOnTop");
+        }
+        return TRUE;
+    }
+
     if (g_isToolModProcessLauncher) {
-        return;
+        return TRUE;
     }
 
     WhTool_ModSettingsChanged();
+    return TRUE;
 }
 
 void Wh_ModUninit() {
+    if (g_isExplorer) {
+        StopBandThread();
+        return;
+    }
+
     if (g_isToolModProcessLauncher) {
         return;
     }
