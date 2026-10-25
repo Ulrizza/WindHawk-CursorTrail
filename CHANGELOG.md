@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6
+- 2026-10-24 AI-review fixes (all optional):
+  - Rate-limit the band-window lookup to once a second while no usable band
+    window exists, instead of enumerating all top-level windows on every
+    rendered frame.
+  - Retry a band window that rejected a blit after 30 seconds instead of
+    falling back to the mod's own overlay for the rest of the Explorer session.
+
 ## 1.5
 - Folded the **Simple Cursor Trail helper - always on top** companion mod into
   this mod as the new **Always on top** setting, enabled by default. The mod is
